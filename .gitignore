@@ -1,0 +1,7 @@
+# Never commit client data: history files, backups, Access databases
+*.mdb
+*.accdb
+history*.json
+*backup*.json
+mockdata/
+__pycache__/
