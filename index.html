@@ -783,9 +783,9 @@ document.addEventListener("click",async e=>{
     if(act==="signin"){msalApp.loginRedirect({scopes:SCOPES});return}
     if(act==="signout"){e.preventDefault();if(!MOCK)msalApp.logoutRedirect({account});return}
     if(act==="reload"){location.reload();return}
-    if(act==="do-setup"){a.disabled=true;a.textContent="Setting up…";
+    if(act==="do-setup"){a.disabled=true;a.textContent="Setting up…";S.setupErr="";
       try{await Store.setup();await loadAll().catch(()=>{});S.settings.woFloor=num($("#su-wo").value)||S.settings.woFloor;await putConfig("settings",S.settings);await afterSignIn()}
-      catch(err){toast("Setup didn't finish: "+err.message);a.disabled=false;a.textContent="Set up"}return}
+      catch(err){S.setupErr=(err&&(err.errorMessage||err.message))||String(err);if(MOCK)toast(S.setupErr);render()}return}
     if(act==="save-settings"){const links={};$("#set-links").value.split("\n").forEach(l=>{const [em,...rest]=l.split("=");const t=rest.join("=").trim();if(em&&em.trim()&&t)links[em.trim().toLowerCase()]=t});
       S.settings.techLinks=links;S.settings.woFloor=num($("#set-wofloor").value)||S.settings.woFloor;
       try{await putConfig("settings",S.settings);await loadAll();render();toast("Saved")}catch(err){toast("Couldn't save: "+err.message)}return}
@@ -878,21 +878,22 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.0.0";
+const APP_VERSION="1.0.1";
+const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const userName=()=>MOCK?"mock.user@midamericameter.com":(account&&(account.username||account.name))||"";
-async function getToken(){
-  try{return (await msalApp.acquireTokenSilent({scopes:SCOPES,account})).accessToken}
+async function getToken(scopes=SCOPES){
+  try{return (await msalApp.acquireTokenSilent({scopes,account})).accessToken}
   catch(e){
-    if(window.msal&&e instanceof msal.InteractionRequiredAuthError){await msalApp.acquireTokenRedirect({scopes:SCOPES,account});await sleep(30000)}
+    if(window.msal&&e instanceof msal.InteractionRequiredAuthError){await msalApp.acquireTokenRedirect({scopes,account});await sleep(30000)}
     throw e;
   }
 }
 async function gfetch(path,opt={}){
   const url=path.startsWith("https://")?path:"https://graph.microsoft.com/v1.0"+path;
   for(let attempt=0;attempt<6;attempt++){
-    const headers={Authorization:"Bearer "+await getToken(),...(opt.headers||{})};
+    const headers={Authorization:"Bearer "+await getToken(opt.scopes),...(opt.headers||{})};
     let body=opt.body;if(opt.json!==undefined){headers["Content-Type"]="application/json";body=JSON.stringify(opt.json)}
     let r;
     try{r=await fetch(url,{method:opt.method||"GET",headers,body})}
@@ -925,7 +926,7 @@ const GraphStore={
   async setup(){
     for(const k in CFG.lists){if(listIds[k])continue;
       const columns=[...LISTCOLS[k].map(n=>({name:n,text:{}})),{name:"Data",text:{allowMultipleLines:true,textType:"plain"}}];
-      const l=await gfetch(`/sites/${siteId}/lists`,{method:"POST",json:{displayName:CFG.lists[k],columns,list:{template:"genericList"}}});listIds[k]=l.id}
+      const l=await gfetch(`/sites/${siteId}/lists`,{method:"POST",scopes:MANAGE_SCOPES,json:{displayName:CFG.lists[k],columns,list:{template:"genericList"}}});listIds[k]=l.id}
     await this.ensureFolder("");for(const sub of ["history","photos","backups"])await this.ensureFolder(sub);
   },
   async ensureFolder(sub){
@@ -1029,6 +1030,7 @@ function viewGate(){
     <p class="muted" style="margin:0">This creates the app's lists and folders in the Meter Testing App SharePoint site. It only needs to be done once.</p>
     <label class="f">Last work order number used in the old system<input id="su-wo" class="num mono" inputmode="numeric" value="17489" style="max-width:200px"></label>
     <div class="note">New meters will be numbered from the next number. Importing history later raises this automatically if needed.</div>
+    <div id="setup-err">${S.setupErr?`<div class="callout warn">Setup didn't finish: ${esc(S.setupErr)}</div>`:""}</div>
     <button class="btn primary" data-act="do-setup" style="align-self:flex-start">Set up</button></div></div>`;
   if(mode==="error")return `<div class="panel" style="max-width:640px;margin:40px auto"><div class="bd stack">
     <h1>Something went wrong</h1><div class="callout warn">${esc(loadError)}</div>
