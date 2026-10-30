@@ -878,7 +878,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.0.1";
+const APP_VERSION="1.0.2";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -924,10 +924,14 @@ const GraphStore={
     return Object.keys(CFG.lists).every(k=>listIds[k]);
   },
   async setup(){
+    const step=async(name,fn)=>{try{return await fn()}catch(e){
+      let who="";try{const t=await getToken(MANAGE_SCOPES);const p=JSON.parse(atob(t.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));who=` [signed in as ${p.upn||p.preferred_username||"?"}; permissions: ${p.scp||"none"}]`}catch(x){}
+      const err=new Error(`${name}: ${e.message}${e.status?" (HTTP "+e.status+")":""}${who}`);err.status=e.status;throw err}};
     for(const k in CFG.lists){if(listIds[k])continue;
       const columns=[...LISTCOLS[k].map(n=>({name:n,text:{}})),{name:"Data",text:{allowMultipleLines:true,textType:"plain"}}];
-      const l=await gfetch(`/sites/${siteId}/lists`,{method:"POST",scopes:MANAGE_SCOPES,json:{displayName:CFG.lists[k],columns,list:{template:"genericList"}}});listIds[k]=l.id}
-    await this.ensureFolder("");for(const sub of ["history","photos","backups"])await this.ensureFolder(sub);
+      const l=await step(`Creating the list "${CFG.lists[k]}"`,()=>gfetch(`/sites/${siteId}/lists`,{method:"POST",scopes:MANAGE_SCOPES,json:{displayName:CFG.lists[k],columns,list:{template:"genericList"}}}));listIds[k]=l.id}
+    await step("Creating the MeterTestingApp folder",()=>this.ensureFolder(""));
+    for(const sub of ["history","photos","backups"])await step(`Creating the ${sub} folder`,()=>this.ensureFolder(sub));
   },
   async ensureFolder(sub){
     const path=CFG.folder+(sub?"/"+sub:"");
