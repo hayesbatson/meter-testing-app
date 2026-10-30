@@ -436,7 +436,7 @@ function viewMeter(id){
     <div class="panel"><div class="bd stack">
       <div class="result-big" id="bigres"></div>
       <div class="note">${o.showPassFail!==false?"Pass/fail prints on the client report.":"Pass/fail is hidden on this client's reports."}</div>
-      <div class="row"><button class="btn" data-act="report">View report</button><button class="btn primary" data-act="next-meter">Save &amp; next meter</button></div>
+      <div class="row"><button class="btn" data-act="save-close">Save &amp; close</button><button class="btn primary" data-act="next-meter">Save &amp; next meter</button><button class="btn" data-act="report">View report</button></div>
       <div class="note">Next meter gets the next work order number and copies size, make, model, type, test setup, flow rates and tech.</div>
     </div></div>
     ${timePanel(S.orders.get(m.orderId),true)}
@@ -803,6 +803,7 @@ document.addEventListener("click",async e=>{
       await createMeter(o.id);
     }
     else if(act==="add-meter")createMeter(id);
+    else if(act==="save-close"){const oid=editing.draft.orderId;editing.dirty=true;setSaveState("Saving…");await flushSave();if(editing&&editing.dirty)return;toast("Saved");go("job-"+oid)}
     else if(act==="next-meter"){await flushSave();createMeter(editing.draft.orderId,editing.draft)}
     else if(act==="report"){await flushSave();S.meters.set(editing.id,clone(editing.draft));go("report-"+editing.id)}
     else if(act==="setting"){editing.draft.setting=a.dataset.v;scheduleSave();a.parentNode.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b===a))}
@@ -878,7 +879,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.0.2";
+const APP_VERSION="1.0.3";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
