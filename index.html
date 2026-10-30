@@ -126,6 +126,10 @@ textarea{resize:vertical;min-height:64px}
 .photos figure{margin:0;position:relative}
 .photos img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
 .photos button{position:absolute;top:4px;right:4px}
+.photos .onrep{display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px;cursor:pointer}
+.photos .onrep input{width:16px;height:16px;accent-color:var(--accent)}
+.paper .photorow{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+.paper .photorow img{width:100%;height:1.55in;object-fit:contain;background:#f4f4f4;border:1px solid #ddd}
 .empty{padding:40px 20px;text-align:center;color:var(--muted)}
 .qbox{border-left:3px solid var(--warn);padding:8px 12px;background:var(--warn-bg);border-radius:0 6px 6px 0;font-size:14px}
 #toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;z-index:20;max-width:calc(100% - 32px)}
@@ -286,7 +290,7 @@ function render(){
   else if(r.v==="job")app.innerHTML=viewJob(r.id);
   else if(r.v==="meter"){app.innerHTML=viewMeter(r.id);updateLive();fillPhotos()}
   else if(r.v==="hist")app.innerHTML=viewHist(r.id);
-  else if(r.v==="report")app.innerHTML=viewReport(r.id);
+  else if(r.v==="report"){app.innerHTML=viewReport(r.id);fillPhotos()}
   else if(r.v==="review")app.innerHTML=viewReview();
   else if(r.v==="setup")app.innerHTML=viewSetup();
   else if(r.v==="perf")app.innerHTML=viewPerf();
@@ -538,6 +542,7 @@ function reportHTML(m,o){
     ${stmt?`<div class="stmt">${stmt}</div>`:""}
     <div class="sh">Parts</div><div style="white-space:pre-wrap;min-height:30px">${esc(m.parts)}</div>
     <div class="sh">Comments</div><div style="white-space:pre-wrap;min-height:30px">${esc(m.comments)}</div>
+    ${reportPhotos(m).length?`<div class="photorow">${reportPhotos(m).map(ph=>`<img data-photo="${esc(ph.itemId)}" ${photoCache[ph.itemId]?`src="${esc(photoCache[ph.itemId])}"`:""} alt="Meter photo">`).join("")}</div>`:""}
     <div class="foot">${NIST_NOTE}</div>
   </div>`;
 }
@@ -572,14 +577,31 @@ function drawReport(doc,m,o){
   if(pf&&r.overall!=="incomplete"){y+=22;B(11);doc.text(r.overall==="pass"?"This Meter meets or exceeds the AWWA standards.":"This Meter does not meet the AWWA standards.",L,y)}
   const FOOT=748;
   const block=(title,txt,maxY)=>{sec(title);N(10.5);let lines=doc.splitTextToSize(txt||"",500);const fit=Math.max(1,Math.floor((maxY-y)/13));if(lines.length>fit){lines=lines.slice(0,fit);lines[fit-1]+=" …"}doc.text(lines,L,y);y+=Math.max(1,lines.length)*13-13};
-  block("Parts",m.parts,Math.min(y+120,FOOT-80));block("Comments",m.comments,FOOT-24);
+  const imgs=(m._imgs||[]).slice(0,3);
+  const PH=imgs.length?Math.max(60,Math.min(118,FOOT-34-y-104)):0;const bottom=FOOT-24-(PH?PH+14:0);
+  block("Parts",m.parts,Math.min(y+120,bottom-56));block("Comments",m.comments,bottom);
+  if(PH){const cw=160,gap=12,top=FOOT-22-PH;
+    imgs.forEach((im,i)=>{const x0=L+i*(cw+gap);const k=Math.min(cw/im.w,PH/im.h);const w=im.w*k,h=im.h*k;
+      try{doc.addImage(im.data,"JPEG",x0+(cw-w)/2,top+(PH-h)/2,w,h)}catch(e){}doc.setDrawColor(210);doc.rect(x0,top,cw,PH)})}
   doc.setDrawColor(150);doc.line(L,FOOT-12,558,FOOT-12);doc.setFont("helvetica","italic");doc.setFontSize(9.5);doc.text(NIST_NOTE,L,FOOT);
 }
 const safeName=s=>String(s||"").replace(/[^A-Za-z0-9._-]+/g,"_").replace(/^_+|_+$/g,"");
-function pdfFor(list){
+function reportPhotos(m){return (m.photos||[]).filter(p=>p.onReport&&p.itemId).slice(0,3)}
+async function photoForPdf(itemId){
+  if(!photoCache[itemId])photoCache[itemId]=await Store.fileUrl(itemId);
+  const r=await fetch(photoCache[itemId]);if(!r.ok)throw new Error("photo download failed");
+  const bmp=await createImageBitmap(await r.blob());const sc=Math.min(1,700/Math.max(bmp.width,bmp.height));
+  const c=document.createElement("canvas");c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+  return {data:c.toDataURL("image/jpeg",.8),w:c.width,h:c.height};
+}
+async function pdfFor(list){
   if(!window.jspdf){toast("PDF tool didn't load. Check your connection and reload.");return null}
   const doc=new window.jspdf.jsPDF({unit:"pt",format:"letter"});
-  list.forEach((m,i)=>{if(i)doc.addPage();drawReport(doc,m,S.orders.get(m.orderId)||{})});
+  for(let i=0;i<list.length;i++){
+    const m={...list[i]};const ph=reportPhotos(m);
+    if(ph.length){if(i===0)toast("Adding photos to the PDF…");m._imgs=[];for(const p of ph){try{m._imgs.push(await photoForPdf(p.itemId))}catch(e){toast("One photo couldn't be added to the PDF")}}}
+    if(i)doc.addPage();drawReport(doc,m,S.orders.get(m.orderId)||{});
+  }
   return doc.output("blob");
 }
 function exportRows(list,o){
@@ -839,8 +861,8 @@ document.addEventListener("click",async e=>{
     else if(act==="phone-qr"){const box=$("#qrbox");box.hidden=!box.hidden;if(!box.hidden){const el=$("#qr");el.innerHTML="";const url=location.origin+location.pathname+"#meter-"+editing.id;
       if(window.QRCode)new QRCode(el,{text:url,width:150,height:150,correctLevel:QRCode.CorrectLevel.M});else el.textContent=url}}
     else if(act==="photo-folder"){try{const url=await Store.folderUrl("photos/WO"+(safeName(editing.draft.wo)||"no-number"));window.open(url,"_blank","noopener")}catch(err){toast(err.status===404?"No photos have been saved for this work order yet.":"Couldn't open the folder: "+err.message)}}
-    else if(act==="pdf-one"){const m=S.meters.get(id);const blob=pdfFor([m]);if(blob)offer(`WO${safeName(m.wo)}_${safeName(m.serial)||"meter"}.pdf`,blob)}
-    else if(act==="pdfs"){const o=S.orders.get(id);const list=selectedOrAll(id);if(!list.length){toast("No meters to report.");return}const blob=pdfFor(list);if(blob)offer(`${safeName(o.client)}_${safeName(jobName(o))}_reports.pdf`,blob)}
+    else if(act==="pdf-one"){const m=S.meters.get(id);const blob=await pdfFor([m]);if(blob)offer(`WO${safeName(m.wo)}_${safeName(m.serial)||"meter"}.pdf`,blob)}
+    else if(act==="pdfs"){const o=S.orders.get(id);const list=selectedOrAll(id);if(!list.length){toast("No meters to report.");return}const blob=await pdfFor(list);if(blob)offer(`${safeName(o.client)}_${safeName(jobName(o))}_reports.pdf`,blob)}
     else if(act==="xlsx"||act==="csv"){const o=S.orders.get(id);const list=selectedOrAll(id);if(!list.length){toast("No meters to export.");return}
       const rows=exportRows(list,o);const base=`${safeName(o.client)}_${safeName(jobName(o))}_results`;
       if(act==="csv"){const csv=rows.map(r=>r.map(v=>{v=v===null||v===undefined?"":String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(",")).join("\r\n");offer(base+".csv","﻿"+csv)}
@@ -874,6 +896,9 @@ document.addEventListener("change",async e=>{
   if((t.id==="f-photo"||t.id==="f-camera")&&editing){const files=[...t.files];t.value="";const ed=editing;
     for(const f of files){try{toast("Uploading photo…");const blob=await shrink(f);const r=await Store.putFile(`photos/WO${safeName(ed.draft.wo)||"no-number"}/${Date.now()}.jpg`,blob);ed.draft.photos.push({itemId:r.id,name:f.name,webUrl:r.webUrl||"",addedAt:Date.now(),by:userName()});if(editing===ed){scheduleSave();await flushSave();showPhotos()}}catch(err){toast("Photo upload failed: "+(err.message||"error"))}}
     toast(files.length>1?"Photos added":"Photo added")}
+  if(t.dataset.onrep!==undefined&&editing){const i=+t.dataset.onrep;const ph=editing.draft.photos[i];if(!ph)return;
+    if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
+    ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
   if(t.id==="hist-file"){const f=t.files[0];t.value="";if(!f)return;try{await importHistory(f);toast("History imported");render()}catch(err){HIST.progress="Import stopped: "+err.message;toast(HIST.progress);render()}return}
 });
 document.addEventListener("keydown",e=>{
@@ -892,7 +917,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.1.0";
+const APP_VERSION="1.2.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1016,7 +1041,7 @@ async function loadAll(){
   S.myTech=linked||"";if(linked)timeWho=linked;
 }
 function photosHTML(m){
-  return (m.photos||[]).map((ph,i)=>`<figure><a href="${esc(ph.webUrl||"#")}" target="_blank" rel="noopener" title="Open full size"><img data-photo="${esc(ph.itemId||"")}" ${photoCache[ph.itemId]?`src="${esc(photoCache[ph.itemId])}"`:""} alt="Photo ${i+1} of meter ${esc(m.serial)}"></a><button class="btn small" data-act="rm-photo" data-i="${i}" aria-label="Delete photo">✕</button></figure>`).join("")||'<span class="note">No photos yet.</span>';
+  return (m.photos||[]).map((ph,i)=>`<figure><a href="${esc(ph.webUrl||"#")}" target="_blank" rel="noopener" title="Open full size"><img data-photo="${esc(ph.itemId||"")}" ${photoCache[ph.itemId]?`src="${esc(photoCache[ph.itemId])}"`:""} alt="Photo ${i+1} of meter ${esc(m.serial)}"></a><button class="btn small" data-act="rm-photo" data-i="${i}" aria-label="Delete photo">✕</button><label class="onrep"><input type="checkbox" id="onrep-${esc(ph.itemId||i)}" data-onrep="${i}" ${ph.onReport?"checked":""}>On report</label></figure>`).join("")||'<span class="note">No photos yet.</span>';
 }
 function showPhotos(){const el=$("#photos");if(el&&editing){el.innerHTML=photosHTML(editing.draft);fillPhotos()}}
 function mergeRemotePhotos(ed){
