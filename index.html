@@ -172,6 +172,7 @@ textarea{resize:vertical;min-height:64px}
 <script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
 <script>window.msal||document.write('<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.35.0/lib/msal-browser.min.js"><\/script>')</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 "use strict";
@@ -376,7 +377,7 @@ function datalists(){
 
 /* ----- meter entry ----- */
 function viewMeter(id){
-  if(!editing||editing.id!==id){const m=S.meters.get(id);if(!m)return notFound("meter");editing={id,draft:normalize(clone(m)),dirty:false}}
+  if(!editing||editing.id!==id){const m=S.meters.get(id);if(!m)return notFound("meter");editing={id,draft:normalize(clone(m)),dirty:false,removed:new Set()}}
   const m=editing.draft;const o=S.orders.get(m.orderId)||{};
   const inp=(path,label,opts={})=>{const v=getPath(m,path)??"";const idd="f-"+path.replace(/\./g,"-");
     return `<label class="f">${label}<input id="${idd}" data-f="${path}" value="${esc(v)}" ${opts.list?`list="dl-${opts.list}"`:""} ${opts.num?'inputmode="decimal" class="num mono"':""} ${opts.type?`type="${opts.type}"`:""} ${opts.ph?`placeholder="${esc(opts.ph)}"`:""}></label>`};
@@ -396,7 +397,7 @@ function viewMeter(id){
     </tbody></table></div><div><button class="btn small" data-act="add-pt" ${(m.points||[]).length>=MAXPTS?"disabled":""}>Add test point</button></div>`:"";
   const ms=metersOf(m.orderId);const idx=ms.findIndex(x=>x.id===id);
   const dupWo=m.wo&&[...S.meters.values()].some(x=>x.id!==m.id&&String(x.wo)===String(m.wo));
-  const photos=(m.photos||[]).map((ph,i)=>`<figure><img data-photo="${esc(ph.itemId||"")}" alt="Photo ${i+1} of meter ${esc(m.serial)}"><button class="btn small" data-act="rm-photo" data-i="${i}" aria-label="Remove photo">✕</button></figure>`).join("");
+  const photos=photosHTML(m);
   return `<div class="stack">
   <div><div class="crumb"><a href="#jobs">Jobs &amp; meters</a> › <a href="#job-${m.orderId}">${esc(o.client)} · ${esc(jobName(o))}</a> › meter ${idx+1} of ${ms.length}</div>
   <div class="row spread"><h1>WO <span class="mono" id="h-wo">${esc(m.wo)||"—"}</span> · <span class="mono" id="h-serial">${esc(m.serial)||"no serial"}</span></h1>
@@ -430,7 +431,16 @@ function viewMeter(id){
     <h3 class="sec">Parts and comments</h3>
     <div class="grid g2"><label class="f">Parts<textarea id="f-parts" data-f="parts">${esc(m.parts)}</textarea></label><label class="f">Comments (printed on report)<textarea id="f-comments" data-f="comments">${esc(m.comments)}</textarea></label></div>
     <h3 class="sec">Photos</h3>
-    <div class="photos">${photos}</div><label class="btn small" style="align-self:flex-start">Add photos<input type="file" id="f-photo" accept="image/*" multiple hidden></label><div class="note">Photos are saved in the SharePoint site under MeterTestingApp/photos and are not printed on the report.</div>
+    <div class="photos" id="photos">${photos}</div>
+    <div class="row">
+      <label class="btn small primary">Take photo<input type="file" id="f-camera" accept="image/*" capture="environment" hidden></label>
+      <label class="btn small">Choose photos<input type="file" id="f-photo" accept="image/*" multiple hidden></label>
+      <button type="button" class="btn small" data-act="phone-qr">Use my phone</button>
+      <button type="button" class="btn small" data-act="photo-folder">Open photo folder</button>
+    </div>
+    <div id="qrbox" hidden class="callout info"><div class="row" style="align-items:flex-start;gap:16px"><div id="qr" style="background:#fff;padding:8px;border-radius:6px"></div>
+      <div class="stack" style="gap:6px;max-width:42ch"><b>Scan with the phone's camera</b><span>It opens this meter in the app on the phone. Tap <b>Take photo</b> there. The photo appears here within a few seconds.</span><span class="note">The phone needs to be signed in to the app once with a company Microsoft account.</span></div></div></div>
+    <div class="note">On a tablet or phone, Take photo opens the camera. Photos are saved in SharePoint under MeterTestingApp/photos/WO${esc(m.wo)||"no-number"} and are not printed on the report.</div>
   </div></div>
   <aside class="side stack">
     <div class="panel"><div class="bd stack">
@@ -485,7 +495,7 @@ function scheduleSave(){if(!editing)return;editing.dirty=true;setSaveState("Savi
 function flushSave(){
   clearTimeout(saveTimer);
   if(!editing||!editing.dirty)return saving;
-  const d=clone(editing.draft);d.updatedAt=Date.now();editing.dirty=false;const ed=editing;
+  mergeRemotePhotos(editing);const d=clone(editing.draft);d.updatedAt=Date.now();editing.dirty=false;const ed=editing;
   saving=saving.then(()=>put("meters",d.id,d)).then(()=>{if(editing===ed&&!ed.dirty)setSaveState("All changes saved")})
     .catch(e=>{ed.dirty=true;setSaveState("Not saved");toast("Couldn't save: "+(e&&e.code==="invalid_argument"?"you have view-only access to this page.":(e&&e.message)||"try again."))});
   return saving;
@@ -825,7 +835,10 @@ document.addEventListener("click",async e=>{
       render();toast(`Approved ${list.length} meters`)}
     else if(act==="del-meter"){if(!confirmClick(a,"Click again to delete"))return;const m=editing.draft;clearTimeout(saveTimer);editing=null;await del("meters",m.id);S.meters.delete(m.id);go("job-"+m.orderId)}
     else if(act==="del-job"){if(!confirmClick(a,"Click again: deletes all its meters"))return;for(const m of metersOf(id)){await del("meters",m.id);S.meters.delete(m.id)}await del("orders",id);S.orders.delete(id);go("jobs")}
-    else if(act==="rm-photo"){const i=+a.dataset.i;const ph=editing.draft.photos.splice(i,1)[0];scheduleSave();render();if(ph&&ph.itemId){Store.removeFile(ph.itemId).catch(()=>{})}}
+    else if(act==="rm-photo"){if(!confirmClick(a,"Delete?"))return;const i=+a.dataset.i;const ph=editing.draft.photos.splice(i,1)[0];if(ph&&ph.itemId)editing.removed.add(ph.itemId);scheduleSave();showPhotos();if(ph&&ph.itemId){Store.removeFile(ph.itemId).catch(()=>{})}}
+    else if(act==="phone-qr"){const box=$("#qrbox");box.hidden=!box.hidden;if(!box.hidden){const el=$("#qr");el.innerHTML="";const url=location.origin+location.pathname+"#meter-"+editing.id;
+      if(window.QRCode)new QRCode(el,{text:url,width:150,height:150,correctLevel:QRCode.CorrectLevel.M});else el.textContent=url}}
+    else if(act==="photo-folder"){try{const url=await Store.folderUrl("photos/WO"+(safeName(editing.draft.wo)||"no-number"));window.open(url,"_blank","noopener")}catch(err){toast(err.status===404?"No photos have been saved for this work order yet.":"Couldn't open the folder: "+err.message)}}
     else if(act==="pdf-one"){const m=S.meters.get(id);const blob=pdfFor([m]);if(blob)offer(`WO${safeName(m.wo)}_${safeName(m.serial)||"meter"}.pdf`,blob)}
     else if(act==="pdfs"){const o=S.orders.get(id);const list=selectedOrAll(id);if(!list.length){toast("No meters to report.");return}const blob=pdfFor(list);if(blob)offer(`${safeName(o.client)}_${safeName(jobName(o))}_reports.pdf`,blob)}
     else if(act==="xlsx"||act==="csv"){const o=S.orders.get(id);const list=selectedOrAll(id);if(!list.length){toast("No meters to export.");return}
@@ -858,9 +871,9 @@ document.addEventListener("change",async e=>{
   if(t.id==="rtech"){reviewTech=t.value;render();return}
   if(t.id==="t-who"){timeWho=t.value;try{localStorage.setItem("mam-who",t.value)}catch(err){}render();return}
   if(t.id==="pf-from"||t.id==="pf-to"){if(t.id==="pf-from")perfFrom=t.value;else perfTo=t.value;if(perfFrom&&perfTo)render();return}
-  if(t.id==="f-photo"&&editing){const files=[...t.files];t.value="";const ed=editing;
-    for(const f of files){try{toast("Uploading photo…");const blob=await shrink(f);const r=await Store.putFile(`photos/WO${safeName(ed.draft.wo)||"no-number"}/${Date.now()}.jpg`,blob);ed.draft.photos.push({itemId:r.id,name:f.name,webUrl:r.webUrl||"",addedAt:Date.now(),by:userName()});if(editing===ed){scheduleSave();render()}}catch(err){toast("Photo upload failed: "+(err.message||"error"))}}
-    toast("Photos added")}
+  if((t.id==="f-photo"||t.id==="f-camera")&&editing){const files=[...t.files];t.value="";const ed=editing;
+    for(const f of files){try{toast("Uploading photo…");const blob=await shrink(f);const r=await Store.putFile(`photos/WO${safeName(ed.draft.wo)||"no-number"}/${Date.now()}.jpg`,blob);ed.draft.photos.push({itemId:r.id,name:f.name,webUrl:r.webUrl||"",addedAt:Date.now(),by:userName()});if(editing===ed){scheduleSave();await flushSave();showPhotos()}}catch(err){toast("Photo upload failed: "+(err.message||"error"))}}
+    toast(files.length>1?"Photos added":"Photo added")}
   if(t.id==="hist-file"){const f=t.files[0];t.value="";if(!f)return;try{await importHistory(f);toast("History imported");render()}catch(err){HIST.progress="Import stopped: "+err.message;toast(HIST.progress);render()}return}
 });
 document.addEventListener("keydown",e=>{
@@ -879,7 +892,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.0.3";
+const APP_VERSION="1.1.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -948,6 +961,8 @@ const GraphStore={
   async create(coll,o){const r=await gfetch(listItems(coll),{method:"POST",json:{fields:fieldsFor(coll,o)}});return String(r.id)},
   async update(coll,id,o){await gfetch(`${listItems(coll)}/${id}/fields`,{method:"PATCH",json:fieldsFor(coll,o)})},
   async remove(coll,id){await gfetch(`${listItems(coll)}/${id}`,{method:"DELETE"})},
+  async get(coll,id){const it=await gfetch(`${listItems(coll)}/${id}?$expand=fields($select=Title,Data)`);let d={};try{d=JSON.parse((it.fields&&it.fields.Data)||"{}")}catch(e){}return {...d,id:String(it.id)}},
+  async folderUrl(path){const it=await gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}`);return it.webUrl},
   async putFile(path,blob){return gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}:/content`,{method:"PUT",body:blob,headers:{"Content-Type":blob.type||"application/octet-stream"}})},
   async getFile(path){
     const it=await gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}`);
@@ -966,6 +981,8 @@ const MockStore={
   async create(coll,o){const id=String(this.n++);this.data[coll].set(id,{...clone(o),id});return id},
   async update(coll,id,o){this.data[coll].set(id,{...clone(o),id})},
   async remove(coll,id){this.data[coll].delete(id)},
+  async get(coll,id){return clone(this.data[coll].get(id))},
+  async folderUrl(path){return "#"},
   async putFile(path,blob){const id="f"+this.n++;this.files.set(path,{id,blob});this.files.set(id,{id,blob});return {id,webUrl:"#"}},
   async getFile(path){const f=this.files.get(path);if(!f){const e=new Error("Not found");e.status=404;throw e}return new Response(f.blob)},
   async fileUrl(itemId){const f=this.files.get(itemId);return f?URL.createObjectURL(f.blob):""},
@@ -998,6 +1015,20 @@ async function loadAll(){
   const linked=(S.settings.techLinks||{})[userName().toLowerCase()];
   S.myTech=linked||"";if(linked)timeWho=linked;
 }
+function photosHTML(m){
+  return (m.photos||[]).map((ph,i)=>`<figure><a href="${esc(ph.webUrl||"#")}" target="_blank" rel="noopener" title="Open full size"><img data-photo="${esc(ph.itemId||"")}" ${photoCache[ph.itemId]?`src="${esc(photoCache[ph.itemId])}"`:""} alt="Photo ${i+1} of meter ${esc(m.serial)}"></a><button class="btn small" data-act="rm-photo" data-i="${i}" aria-label="Delete photo">✕</button></figure>`).join("")||'<span class="note">No photos yet.</span>';
+}
+function showPhotos(){const el=$("#photos");if(el&&editing){el.innerHTML=photosHTML(editing.draft);fillPhotos()}}
+function mergeRemotePhotos(ed){
+  const remote=S.meters.get(ed.id);if(!remote||!Array.isArray(remote.photos))return 0;
+  const have=new Set((ed.draft.photos||[]).map(p=>p.itemId));let added=0;
+  remote.photos.forEach(p=>{if(p.itemId&&!have.has(p.itemId)&&!ed.removed.has(p.itemId)){ed.draft.photos.push(p);added++}});
+  return added;
+}
+setInterval(async()=>{
+  const r=route();if(r.v!=="meter"||!editing||editing.id!==r.id||document.hidden||mode!=="ready")return;
+  try{const fresh=await Store.get("meters",r.id);if(!editing||editing.id!==fresh.id)return;S.meters.set(fresh.id,fresh);if(mergeRemotePhotos(editing)){showPhotos();toast("New photo added")}}catch(e){}
+},8000);
 async function refresh(){
   if(document.hidden||mode!=="ready")return;
   try{await flushSave();await loadAll();softRender()}catch(e){}
