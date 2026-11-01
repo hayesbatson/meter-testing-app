@@ -126,6 +126,10 @@ textarea{resize:vertical;min-height:64px}
 .photos figure{margin:0;position:relative}
 .photos img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
 .photos button{position:absolute;top:4px;right:4px}
+.jstat{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700;white-space:nowrap;background:var(--surface-2);color:var(--muted)}
+.jstat.warn{background:var(--warn-bg);color:var(--warn)}.jstat.info{background:var(--info-bg);color:var(--info)}.jstat.ok{background:var(--accent-soft);color:var(--ink)}.jstat.done{background:var(--pass-bg);color:var(--pass)}
+.sortbtn{font:inherit;font-size:inherit;letter-spacing:inherit;text-transform:inherit;font-weight:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+.sortbtn.on{color:var(--ink)}
 .photos .onrep{display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px;cursor:pointer}
 .photos .onrep input{width:16px;height:16px;accent-color:var(--accent)}
 .paper .photorow{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
@@ -267,7 +271,7 @@ const rangeTxt=lim=>lim?`${lim[0].toFixed(1)}–${lim[1].toFixed(1)}%`:"no limit
 /* ---------- routing ---------- */
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
-  for(const p of ["job","meter","report","hist"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
+  for(const p of ["job","meter","report","hist","email"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
   if(h.startsWith("order-"))return{v:"job",id:h.slice(6)};
   if(h==="review"||h==="setup"||h==="perf")return{v:h};
   return{v:"jobs"};
@@ -280,7 +284,7 @@ function render(){
   const r=route();
   const reviewN=[...S.meters.values()].filter(m=>m.status==="ready"||m.status==="question").length;
   $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["perf","Performance"],["setup","Limits &amp; lists"]]
-    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist"].includes(r.v)))?"on":""}">${t}</a>`).join("");
+    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email"].includes(r.v)))?"on":""}">${t}</a>`).join("");
   $("#mode").innerHTML=account&&mode!=="signin"?`${esc(account.name||account.username||"")} · <a href="#" data-act="signout">Sign out</a>`:"";
   $("#nav").hidden=mode!=="ready";
   const app=$("#app");
@@ -290,6 +294,7 @@ function render(){
   else if(r.v==="job")app.innerHTML=viewJob(r.id);
   else if(r.v==="meter"){app.innerHTML=viewMeter(r.id);updateLive();fillPhotos()}
   else if(r.v==="hist")app.innerHTML=viewHist(r.id);
+  else if(r.v==="email")app.innerHTML=viewEmail(r.id);
   else if(r.v==="report"){app.innerHTML=viewReport(r.id);fillPhotos()}
   else if(r.v==="review")app.innerHTML=viewReview();
   else if(r.v==="setup")app.innerHTML=viewSetup();
@@ -314,13 +319,14 @@ function viewJobs(){
       ${hits.map(m=>{const o=S.orders.get(m.orderId);return `<tr class="click" data-go="meter-${m.id}"><td><span class="wo">${esc(m.wo)||"—"}</span></td><td class="mono"><b>${esc(m.serial)}</b></td><td>${esc(o&&o.client)}</td><td>${esc(jobName(o))}</td><td>${fmtDate(m.testDate)}</td><td>${chip(meterResult(normalize(clone(m))).overall)}</td><td data-stop><button class="btn small" data-go="report-${m.id}">Report</button></td></tr>`}).join("")||'<tr><td colspan="7"><div class="empty">No meter has that work order or serial number.</div></td></tr>'}
       </tbody></table></div></div>`;
   }
-  const jobs=allJobs.filter(o=>!q||[o.client,o.estimate,o.po,o.workOrder].some(v=>String(v||"").toLowerCase().includes(q)));
+  const jobs=sortJobs(allJobs.filter(o=>!q||[o.client,o.estimate,o.po,o.workOrder,o.contact].some(v=>String(v||"").toLowerCase().includes(q)))
+    .filter(o=>q||jobFilter==="all"||(jobFilter==="open"?jobStatus(o)!=="Complete":jobStatus(o)===jobFilter)));
   const rows=jobs.map(o=>{
     const ms=metersOf(o.id);const res=ms.map(m=>meterResult(normalize(clone(m))));
     const p=res.filter(r=>r.overall==="pass").length,f=res.filter(r=>r.overall==="fail").length;
     const appr=ms.filter(m=>m.status==="approved").length;
     const wos=ms.map(m=>num(m.wo)).filter(n=>n!==null).sort((a,b)=>a-b);
-    return `<tr class="click" data-go="job-${o.id}"><td><b>${esc(o.client)}</b></td><td class="mono">${esc(o.estimate)||'<span class="muted">—</span>'}</td><td class="mono">${esc(o.po)||'<span class="muted">—</span>'}</td><td>${APPROVAL[o.approval]||'<span class="muted">—</span>'}</td><td>${fmtDate(o.received)}</td>
+    return `<tr class="click" data-go="job-${o.id}"><td><b>${esc(o.client)}</b></td><td>${jsChip(o)}</td><td class="mono">${esc(o.estimate)||'<span class="muted">—</span>'}</td><td class="mono">${esc(o.po)||'<span class="muted">—</span>'}</td><td>${APPROVAL[o.approval]||'<span class="muted">—</span>'}</td><td>${fmtDate(o.received)}</td>
       <td class="mono">${wos.length?(wos.length>1?`${wos[0]}–${wos[wos.length-1]}`:wos[0]):'<span class="muted">—</span>'}</td><td class="num">${ms.length}</td><td class="num">${p}</td><td class="num">${f?`<span style="color:var(--fail);font-weight:700">${f}</span>`:0}</td>
       <td>${ms.length?`${appr} of ${ms.length} approved`:'<span class="muted">No meters yet</span>'}</td></tr>`}).join("");
   return `<div class="stack">
@@ -328,14 +334,16 @@ function viewJobs(){
     <div id="newjob" hidden></div>
     ${meterHits}
     ${histHits(q)}
-    <div class="panel"><div class="hd"><h2>Jobs${q?` matching “${esc(jobSearch)}”`:""}</h2><span class="note">One job per QuickBooks estimate. Each meter gets its own work order number.</span></div>
-    <div class="tablewrap"><table class="list"><thead><tr><th>Client</th><th>QBO estimate</th><th>PO</th><th>Approval</th><th>Received</th><th>Work orders</th><th class="num">Meters</th><th class="num">Pass</th><th class="num">Fail</th><th>Review</th></tr></thead>
-    <tbody>${rows||`<tr><td colspan="10"><div class="empty">${q?"No jobs match.":"No jobs yet. Choose <b>New job</b> to start one."}</div></td></tr>`}</tbody></table></div></div>
+    <div class="panel"><div class="hd"><h2>Jobs${q?` matching “${esc(jobSearch)}”`:""} <span class="muted" style="font-weight:600">(${jobs.length})</span></h2>
+      <label class="row" style="gap:8px;font-size:13px">Show<select id="jfilter" style="width:auto">${[["open","All open jobs"],["all","All jobs"],...JOB_STATUSES.map(x=>[x,x])].map(([v,t])=>`<option value="${esc(v)}" ${jobFilter===v?"selected":""}>${esc(t)}</option>`).join("")}</select></label></div>
+    <div class="tablewrap"><table class="list"><thead><tr>${sortTh("client","Client")}${sortTh("status","Status")}${sortTh("estimate","QBO estimate")}<th>PO</th><th>Approval</th>${sortTh("received","Received")}${sortTh("wo","Work orders")}${sortTh("meters","Meters","num")}<th class="num">Pass</th><th class="num">Fail</th><th>Review</th></tr></thead>
+    <tbody>${rows||`<tr><td colspan="11"><div class="empty">${q?"No jobs match.":jobFilter!=="all"&&allJobs.length?"No jobs with this status. Choose All jobs to see the rest.":"No jobs yet. Choose <b>New job</b> to start one."}</div></td></tr>`}</tbody></table></div></div>
   </div>`;
 }
 function jobFields(o,pre,data){
   const a=o.approval||"";
-  return `<label class="f">Client<input id="${pre}-client" ${data?'data-of="client"':""} list="dl-clients" value="${esc(o.client)}"></label>
+  return `<label class="f">Job status<select id="${pre}-status" ${data?'data-of="status"':""}>${JOB_STATUSES.map(x=>`<option ${jobStatus(o)===x?"selected":""}>${esc(x)}</option>`).join("")}</select></label>
+    <label class="f">Client<input id="${pre}-client" ${data?'data-of="client"':""} list="dl-clients" value="${esc(o.client)}"></label>
     <label class="f">QBO estimate #<input id="${pre}-est" ${data?'data-of="estimate"':""} value="${esc(o.estimate)}"></label>
     <label class="f">Client PO #<input id="${pre}-po" ${data?'data-of="po"':""} value="${esc(o.po)}" placeholder="If the client sent one"></label>
     <label class="f">Approval<select id="${pre}-appr" ${data?'data-of="approval"':""}>${["",...Object.keys(APPROVAL)].map(k=>`<option value="${k}" ${a===k?"selected":""}>${k?APPROVAL[k]:"Choose…"}</option>`).join("")}</select></label>
@@ -346,7 +354,7 @@ function newJobForm(){
   const el=$("#newjob");el.hidden=false;
   el.innerHTML=`<div class="panel"><div class="bd stack"><h2>New job</h2>
     <div class="grid g3">${jobFields({received:today(),showPassFail:true},"nj",false)}</div>${datalists()}
-    <div class="row"><button class="btn primary" data-act="create-job">Create job and add first meter</button><button class="btn" data-act="cancel-job">Cancel</button></div></div></div>`;
+    <div class="row"><button class="btn primary" data-act="create-job" data-meter="1">Create job and add first meter</button><button class="btn" data-act="create-job">Create job only</button><button class="btn" data-act="cancel-job">Cancel</button></div></div></div>`;
   $("#nj-client").focus();
 }
 
@@ -362,9 +370,9 @@ function viewJob(id){
   const selN=ms.filter(m=>S.sel.has(m.id)).length;
   return `<div class="stack">
     <div><div class="crumb"><a href="#jobs">Jobs &amp; meters</a></div>
-    <div class="row spread"><h1>${esc(o.client)} · ${esc(jobName(o))}</h1>
+    <div class="row spread"><h1>${esc(o.client)} · ${esc(jobName(o))} ${jsChip(o)}</h1>
       <div class="row"><button class="btn primary" data-act="add-meter" data-id="${id}">Add meter</button></div></div></div>
-    <div class="meterlayout"><div class="panel"><div class="bd grid g3">${jobFields(o,"o",true)}</div>${datalists()}</div><aside>${timePanel(o,false)}</aside></div>
+    <div class="meterlayout"><div class="stack"><div class="panel"><div class="bd grid g3">${jobFields(o,"o",true)}</div>${datalists()}</div>${contactPanel(o)}</div><aside class="stack">${timePanel(o,false)}${emailPanel(o)}</aside></div>
     <div class="panel"><div class="hd"><h2>Meters <span class="muted" style="font-weight:600">(${ms.length})</span></h2>
       <div class="row"><span class="note">${selN?`${selN} selected`:"Exports include all meters unless you tick some"}</span>
       <button class="btn small" data-act="xlsx" data-id="${id}">Excel</button><button class="btn small" data-act="csv" data-id="${id}">CSV</button><button class="btn small" data-act="pdfs" data-id="${id}">PDF reports</button></div></div>
@@ -376,7 +384,7 @@ function viewJob(id){
 function notFound(what){return `<div class="empty">That ${what} isn't here any more. <a href="#jobs">Back to jobs</a></div>`}
 function datalists(){
   const L=S.lists;const dl=(id,a)=>`<datalist id="dl-${id}">${(a||[]).map(v=>`<option value="${esc(v)}">`).join("")}</datalist>`;
-  return dl("clients",[...new Set([...(L.clients||[]),...HIST.customers])])+dl("techs",L.techs)+dl("sizes",L.sizes)+dl("mfr",L.manufacturers)+dl("models",L.models)+dl("regs",L.registrations)+dl("locs",L.locations);
+  return dl("clients",[...new Set([...QBO.list.map(c=>c.name),...(L.clients||[]),...HIST.customers])])+dl("techs",L.techs)+dl("sizes",L.sizes)+dl("mfr",L.manufacturers)+dl("models",L.models)+dl("regs",L.registrations)+dl("locs",L.locations);
 }
 
 /* ----- meter entry ----- */
@@ -825,14 +833,31 @@ document.addEventListener("click",async e=>{
     if(act==="pdf-hist"){const row=HIST.rows.find(r=>String(r[0])===a.dataset.wo);const ch=row&&HIST.chunks.get(row[7]);const h=ch&&ch[a.dataset.wo];if(!h)return;
       if(!window.jspdf){toast("PDF tool didn't load. Reload and try again.");return}
       const doc=new window.jspdf.jsPDF({unit:"pt",format:"letter"});drawReport(doc,histToMeter(h),{client:h.customer,showPassFail:false});offer(`WO${safeName(h.wo)}_${safeName(h.serial)||"meter"}.pdf`,doc.output("blob"));return}
+    if(act==="sort"){const k=a.dataset.k;jobSort=jobSort.key===k?{key:k,dir:-jobSort.dir}:{key:k,dir:k==="received"?-1:1};render();return}
+    if(act==="qbo-fill"){const o=S.orders.get(route().id);if(!o)return;const n={...o};if(!fillFromQbo(n,true)){toast(`No QuickBooks customer is named “${o.client}”. Pick the client from the drop-down list.`);return}
+      S.orders.set(o.id,n);try{await put("orders",o.id,n);toast("Filled from QuickBooks")}catch(err){toast("Couldn't save: "+err.message)}render();return}
+    if(act==="copy-ship"){const o=S.orders.get(route().id);if(!o)return;if(!String(o.shipTo||"").trim()){toast("Enter a ship-to address first.");return}toast(await copyText(shipLabel(o))?"Ship-to address copied":"Couldn't copy. Select the address and copy it by hand.");return}
+    if(act==="ship-add"){const o=S.orders.get(route().id);if(!o)return;const carrier=$("#sh-carrier").value,tracking=$("#sh-track").value.trim(),date=$("#sh-date").value;
+      if(!tracking&&carrier!=="Customer pickup"){toast("Enter the tracking number.");return}
+      const n={...o,shipments:[...(o.shipments||[]),{id:uid("s"),carrier,tracking,date,by:userName(),at:Date.now()}]};S.orders.set(o.id,n);
+      try{await put("orders",o.id,n);toast(carrier==="Customer pickup"?"Pickup recorded":"Shipment recorded")}catch(err){toast("Couldn't save: "+err.message)}render();return}
+    if(act==="ship-del"){if(!confirmClick(a,"Delete?"))return;const o=S.orders.get(route().id);if(!o)return;const n={...o,shipments:(o.shipments||[]).filter(x=>x.id!==a.dataset.sid)};S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+err.message)}render();return}
+    if(act==="email-send"){sendResults(id,a);return}
+    if(act==="email-refill"){refillEmail(true);render();return}
+    if(act==="email-all"){metersOf(route().id).forEach(m=>a.dataset.v==="1"?emailDraft.sel.add(m.id):emailDraft.sel.delete(m.id));refillEmail(false);render();return}
+    if(act==="save-email"){S.settings.shopEmail=$("#set-shop").value.trim()||DEFAULT_EMAIL.shopEmail;S.settings.emailSubject=$("#set-subj").value;S.settings.emailBody=$("#set-body").value;
+      try{await putConfig("settings",S.settings);toast("Email wording saved")}catch(err){toast("Couldn't save: "+err.message)}return}
+    if(act==="email-default"){$("#set-subj").value=DEFAULT_EMAIL.emailSubject;$("#set-body").value=DEFAULT_EMAIL.emailBody;toast("Default wording restored. Choose Save to keep it.");return}
     if(act==="new-job")newJobForm();
     else if(act==="cancel-job"){$("#newjob").hidden=true}
     else if(act==="create-job"){
       const client=$("#nj-client").value.trim();
       if(!client){toast("Enter the client.");return}
-      const o={id:uid("o"),client,estimate:$("#nj-est").value.trim(),po:$("#nj-po").value.trim(),approval:$("#nj-appr").value,received:$("#nj-rec").value,showPassFail:$("#nj-pf").value==="1",createdAt:Date.now()};
+      const st=$("#nj-status").value;
+      const o={id:uid("o"),client,status:st,statusLog:[{status:st,at:Date.now(),by:userName()}],estimate:$("#nj-est").value.trim(),po:$("#nj-po").value.trim(),approval:$("#nj-appr").value,received:$("#nj-rec").value,showPassFail:$("#nj-pf").value==="1",createdAt:Date.now()};
+      fillFromQbo(o,false);
       try{await createRec("orders",o)}catch(err){toast("Couldn't create the job: "+(err.message||err.code));return}
-      await createMeter(o.id);
+      if(a.dataset.meter)await createMeter(o.id);else go("job-"+o.id);
     }
     else if(act==="add-meter")createMeter(id);
     else if(act==="save-close"){const oid=editing.draft.orderId;editing.dirty=true;setSaveState("Saving…");await flushSave();if(editing&&editing.dirty)return;toast("Saved");go("job-"+oid)}
@@ -880,6 +905,7 @@ document.addEventListener("click",async e=>{
 document.addEventListener("input",e=>{
   const t=e.target;
   if(t.id==="jsearch"){jobSearch=t.value;render();return}
+  if(emailDraft&&/^em-(to|cc|subj|body)$/.test(t.id)){emailDraft[{"em-to":"to","em-cc":"cc","em-subj":"subject","em-body":"body"}[t.id]]=t.value;if(t.id==="em-subj"||t.id==="em-body")emailDraft.edited=true;return}
   if(t.dataset.f&&editing&&!("rerender" in t.dataset)&&t.tagName!=="SELECT"){setPath(editing.draft,t.dataset.f,t.type==="checkbox"?t.checked:t.value);updateLive();scheduleSave()}
 });
 document.addEventListener("change",async e=>{
@@ -887,7 +913,9 @@ document.addEventListener("change",async e=>{
   if(t.dataset.f&&editing&&/^(before|after)\.\d+\.(start|end)$/.test(t.dataset.f)){chainReads(t.dataset.f)}
   if(t.dataset.f&&editing&&t.tagName==="SELECT"&&!("rerender" in t.dataset)){setPath(editing.draft,t.dataset.f,t.value);scheduleSave();return}
   if(t.dataset.f&&editing&&("rerender" in t.dataset)){setPath(editing.draft,t.dataset.f,t.type==="checkbox"?t.checked:t.value);normalize(editing.draft);scheduleSave();render();return}
-  if(t.dataset.of){const o=S.orders.get(route().id);if(!o)return;const n={...o,[t.dataset.of]:t.dataset.of==="showPassFail"?t.value==="1":t.value};S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+(err.message||err.code))}render();return}
+  if(t.dataset.of){const o=S.orders.get(route().id);if(!o)return;const n={...o,[t.dataset.of]:t.dataset.of==="showPassFail"?t.value==="1":t.value};
+    if(t.dataset.of==="status")n.statusLog=[...(o.statusLog||[]),{status:t.value,at:Date.now(),by:userName()}];
+    if(t.dataset.of==="client"&&fillFromQbo(n,false))toast("Filled contact and ship-to from QuickBooks");S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+(err.message||err.code))}render();return}
   if(t.dataset.sel){t.checked?S.sel.add(t.dataset.sel):S.sel.delete(t.dataset.sel);render();return}
   if(t.dataset.selall){const ms=metersOf(t.dataset.selall);ms.forEach(m=>t.checked?S.sel.add(m.id):S.sel.delete(m.id));render();return}
   if(t.id==="rtech"){reviewTech=t.value;render();return}
@@ -899,6 +927,11 @@ document.addEventListener("change",async e=>{
   if(t.dataset.onrep!==undefined&&editing){const i=+t.dataset.onrep;const ph=editing.draft.photos[i];if(!ph)return;
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
+  if(t.id==="jfilter"){jobFilter=t.value;render();return}
+  if(t.dataset.emsel&&emailDraft){t.checked?emailDraft.sel.add(t.dataset.emsel):emailDraft.sel.delete(t.dataset.emsel);refillEmail(false);render();return}
+  if(t.id==="em-xlsx"&&emailDraft){emailDraft.xlsx=t.checked;return}
+  if(t.id==="qbo-file"){const f=t.files[0];t.value="";if(!f)return;const pr=$("#qbo-progress");if(pr)pr.textContent="Importing…";
+    try{const n=await importQbo(f);QBO.progress=`Imported ${n.toLocaleString()} customers.`;toast(QBO.progress)}catch(err){QBO.progress="Import stopped: "+err.message;toast(QBO.progress)}render();return}
   if(t.id==="hist-file"){const f=t.files[0];t.value="";if(!f)return;try{await importHistory(f);toast("History imported");render()}catch(err){HIST.progress="Import stopped: "+err.message;toast(HIST.progress);render()}return}
 });
 document.addEventListener("keydown",e=>{
@@ -917,7 +950,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.2.0";
+const APP_VERSION="1.3.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -987,6 +1020,8 @@ const GraphStore={
   async update(coll,id,o){await gfetch(`${listItems(coll)}/${id}/fields`,{method:"PATCH",json:fieldsFor(coll,o)})},
   async remove(coll,id){await gfetch(`${listItems(coll)}/${id}`,{method:"DELETE"})},
   async get(coll,id){const it=await gfetch(`${listItems(coll)}/${id}?$expand=fields($select=Title,Data)`);let d={};try{d=JSON.parse((it.fields&&it.fields.Data)||"{}")}catch(e){}return {...d,id:String(it.id)}},
+  async sendMail(m){const rc=a=>a.map(x=>({emailAddress:{address:x}}));
+    await gfetch(`/users/${encodeURIComponent(m.from)}/sendMail`,{method:"POST",scopes:MAIL_SCOPES,json:{message:{subject:m.subject,body:{contentType:"Text",content:m.body},toRecipients:rc(m.to),ccRecipients:rc(m.cc),from:{emailAddress:{address:m.from}},attachments:m.attachments},saveToSentItems:true}})},
   async folderUrl(path){const it=await gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}`);return it.webUrl},
   async putFile(path,blob){return gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}:/content`,{method:"PUT",body:blob,headers:{"Content-Type":blob.type||"application/octet-stream"}})},
   async getFile(path){
@@ -1008,6 +1043,7 @@ const MockStore={
   async remove(coll,id){this.data[coll].delete(id)},
   async get(coll,id){return clone(this.data[coll].get(id))},
   async folderUrl(path){return "#"},
+  sent:[],async sendMail(m){this.sent.push(m)},
   async putFile(path,blob){const id="f"+this.n++;this.files.set(path,{id,blob});this.files.set(id,{id,blob});return {id,webUrl:"#"}},
   async getFile(path){const f=this.files.get(path);if(!f){const e=new Error("Not found");e.status=404;throw e}return new Response(f.blob)},
   async fileUrl(itemId){const f=this.files.get(itemId);return f?URL.createObjectURL(f.blob):""},
@@ -1018,7 +1054,7 @@ const Store=MOCK?MockStore:GraphStore;
 
 /* ---------- saving ---------- */
 function stamp(d){d.lastEditedBy=userName();d.lastEditedAt=Date.now();return d}
-async function put(coll,id,data){const d=stamp(clone(data));delete d.id;await Store.update(coll,id,d)}
+async function put(coll,id,data){const d=stamp(clone(data));delete d.id;await Store.update(coll,id,d);if(S[coll] instanceof Map)S[coll].set(String(id),{...d,id:String(id)})}
 async function createRec(coll,data){
   data.createdBy=userName();stamp(data);delete data.id;
   const id=await Store.create(coll,data);data.id=id;S[coll].set(id,data);return id;
@@ -1077,7 +1113,7 @@ async function afterSignIn(){
     const ok=await Store.connect();
     if(!ok){mode="setup";render();return}
     await loadAll();mode="ready";render();
-    loadHistory();
+    loadHistory();loadQbo();
     clearInterval(refreshTimer);refreshTimer=setInterval(refresh,60000);
   }catch(e){mode="error";loadError=e.status===403||e.status===401?"Your Microsoft account doesn't have access to the Meter Testing App SharePoint site. Ask Hayes to add you as a member. ("+e.message+")":e.message;render()}
 }
@@ -1179,6 +1215,9 @@ function viewHist(wo){
 
 /* ---------- setup & data (on the Limits & lists page) ---------- */
 function viewDataPanel(){
+  return emailSettingsPanel()+viewDataPanel2();
+}
+function viewDataPanel2(){
   const links=Object.entries(S.settings.techLinks||{}).map(([e,t])=>`${e} = ${t}`).join("\n");
   const hs=HIST.state==="ready"?`${(HIST.rows.length).toLocaleString()} old meters, up to WO ${HIST.woMax}. Imported ${HIST.index&&HIST.index.imported?new Date(HIST.index.imported).toLocaleString():""}${HIST.index&&HIST.index.importedBy?" by "+esc(HIST.index.importedBy):""}.`
     :HIST.state==="none"?"Not imported yet.":HIST.state==="error"?"Couldn't load: "+esc(HIST.err):"Loading…";
@@ -1219,6 +1258,200 @@ function histHits(q){
     ${hits.map(r=>`<tr class="click" data-go="hist-${esc(r[0])}"><td><span class="wo">${esc(r[0])}</span></td><td class="mono">${esc(r[1])}</td><td>${esc(r[2])}</td><td>${esc(tl(r[5]))}</td><td>${esc(r[6])}</td><td>${fmtDate(r[3])}</td><td>${fmtDate(r[4])}</td></tr>`).join("")||'<tr><td colspan="7"><div class="empty">No old work orders match.</div></td></tr>'}
     </tbody></table></div></div>`;
 }
+/* ---------- job status ---------- */
+const JOB_STATUSES=["Not received","Needs evaluation","Waiting for approval","Needs followup","Ready for service","Service in progress","Service complete","Ready to ship","Complete"];
+const JS_TONE={"Not received":"none","Needs evaluation":"warn","Waiting for approval":"warn","Needs followup":"warn","Ready for service":"info","Service in progress":"info","Service complete":"ok","Ready to ship":"ok","Complete":"done"};
+const jobStatus=o=>JOB_STATUSES.includes(o&&o.status)?o.status:"Not received";
+const jsChip=o=>{const s=jobStatus(o);return `<span class="jstat ${JS_TONE[s]}">${esc(s)}</span>`};
+let jobSort={key:"status",dir:1},jobFilter="open";
+function sortJobs(list){
+  const k=jobSort.key,d=jobSort.dir;const minWo=o=>Math.min(...metersOf(o.id).map(m=>num(m.wo)??Infinity));
+  const val=o=>k==="status"?JOB_STATUSES.indexOf(jobStatus(o)):k==="client"?String(o.client||"").toLowerCase():k==="received"?(o.received||""):k==="estimate"?String(o.estimate||""):k==="wo"?minWo(o):k==="meters"?metersOf(o.id).length:0;
+  return [...list].sort((a,b)=>{const x=val(a),y=val(b);if(x<y)return -d;if(x>y)return d;return (b.received||"").localeCompare(a.received||"")||(b.createdAt||0)-(a.createdAt||0)});
+}
+const sortTh=(key,label,cls="")=>`<th class="${cls}"><button type="button" class="sortbtn${jobSort.key===key?" on":""}" data-act="sort" data-k="${key}">${label}${jobSort.key===key?(jobSort.dir>0?" ▲":" ▼"):""}</button></th>`;
+
+/* ---------- customers from QuickBooks (SharePoint: MeterTestingApp/customers) ---------- */
+const QBO={state:"idle",list:[],map:new Map(),imported:"",importedBy:"",progress:""};
+function parseQboRows(rows){
+  let h=-1;for(let i=0;i<Math.min(rows.length,30);i++){if((rows[i]||[]).some(c=>/customer full name/i.test(String(c||""))) ){h=i;break}}
+  if(h<0)for(let i=0;i<Math.min(rows.length,30);i++){if((rows[i]||[]).some(c=>/^(customer|name|display name)$/i.test(String(c||"").trim()))){h=i;break}}
+  if(h<0)throw new Error("Couldn't find the header row. Export the Customer Contact List report from QuickBooks.");
+  const head=rows[h].map(c=>String(c||"").trim().toLowerCase());
+  const col=re=>head.findIndex(c=>re.test(c));
+  const ci={name:col(/customer full name|^customer$|^name$|display name/),phone:col(/phone/),email:col(/e-?mail/),contact:col(/^full name$|contact/),bill:col(/bill/),ship:col(/ship/)};
+  if(ci.name<0)throw new Error("Couldn't find the customer name column.");
+  const out=[];
+  for(const r of rows.slice(h+1)){
+    const g=k=>ci[k]>=0?String(r[ci[k]]??"").trim():"";
+    const name=g("name");if(!name)continue;
+    const rest=[g("phone"),g("email"),g("bill"),g("ship"),g("contact")].join("");
+    if(!rest&&/(GMT|\bAM\b|\bPM\b|^\s*(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),)/i.test(name))continue;
+    const emails=g("email").split(/[,;\s]+/).map(s=>s.trim()).filter(s=>/@/.test(s));
+    const phone=g("phone").replace(/\s+/g," ").trim();
+    const bill=g("bill").replace(/\r/g,""),ship=g("ship").replace(/\r/g,"");
+    out.push({name,contact:g("contact").replace(/\s+/g," "),phone,emails,bill,ship:ship||bill});
+  }
+  return out;
+}
+async function loadQbo(){
+  if(QBO.state==="loading")return;QBO.state="loading";
+  try{const r=await Store.getFile("customers/qbo-customers.json");const j=await r.json();setQbo(j)}
+  catch(e){QBO.state=e.status===404?"none":"error";QBO.err=e.message}
+  softRender();
+}
+function setQbo(j){QBO.list=j.customers||[];QBO.map=new Map(QBO.list.map(c=>[c.name.trim().toLowerCase(),c]));QBO.imported=j.imported||"";QBO.importedBy=j.importedBy||"";QBO.state="ready"}
+async function importQbo(file){
+  if(!window.XLSX)throw new Error("The Excel tool didn't load. Reload the page and try again.");
+  const wb=XLSX.read(await file.arrayBuffer(),{type:"array"});const ws=wb.Sheets[wb.SheetNames[0]];
+  const list=parseQboRows(XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:false}));
+  if(!list.length)throw new Error("No customers found in that file.");
+  const j={imported:new Date().toISOString(),importedBy:userName(),source:file.name,customers:list};
+  await Store.putFile("customers/qbo-customers.json",new Blob([JSON.stringify(j)],{type:"application/json"}));
+  setQbo(j);return list.length;
+}
+const qboFor=name=>QBO.map.get(String(name||"").trim().toLowerCase());
+const phoneMain=p=>{const m=String(p||"").match(/Phone:\s*([^A-Za-z]+?)(?=\s+[A-Za-z]+:|$)/);return (m?m[1]:String(p||"")).trim()};
+function fillFromQbo(n,overwrite){
+  const c=qboFor(n.client);if(!c)return false;
+  const set=(k,v)=>{if(v&&(overwrite||!String(n[k]||"").trim()))n[k]=v};
+  set("contact",c.contact);set("emails",c.emails.join(", "));set("phone",phoneMain(c.phone));set("shipTo",c.ship);
+  return true;
+}
+
+/* ---------- shipping ---------- */
+const CARRIERS=["UPS","FedEx","Customer pickup","Other"];
+function trackUrl(s){const t=encodeURIComponent(String(s.tracking||"").trim());if(!t)return "";
+  if(s.carrier==="UPS")return "https://www.ups.com/track?tracknum="+t;if(s.carrier==="FedEx")return "https://www.fedex.com/fedextrack/?trknbr="+t;return ""}
+function shipLabel(o){return [o.client,o.contact?"Attn: "+o.contact:"",o.shipTo,o.phone].map(s=>String(s||"").trim()).filter(Boolean).join("\n")}
+async function copyText(t){
+  try{await navigator.clipboard.writeText(t);return true}
+  catch(e){const ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand("copy")}catch(x){}ta.remove();return ok}
+}
+function contactPanel(o){
+  const ships=(o.shipments||[]).map(s=>{const u=trackUrl(s);return `<tr><td>${fmtDate(s.date)}</td><td>${esc(s.carrier)}</td><td class="mono">${u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(s.tracking)}</a>`:esc(s.tracking)||'<span class="muted">—</span>'}</td><td class="note">${esc(s.by||"")}</td><td><button class="btn small" data-act="ship-del" data-sid="${esc(s.id)}" aria-label="Delete shipment">✕</button></td></tr>`}).join("");
+  const match=qboFor(o.client);
+  return `<div class="panel"><div class="hd"><h2>Contact &amp; shipping</h2><button class="btn small" data-act="qbo-fill" ${QBO.state!=="ready"?"disabled":""} title="${match?"Replace with the QuickBooks details for "+esc(match.name):"No QuickBooks customer with this exact name"}">Fill from QuickBooks</button></div>
+    <div class="bd stack">
+      <div class="grid g3"><label class="f">Contact<input id="o-contact" data-of="contact" value="${esc(o.contact)}"></label>
+        <label class="f">Email(s)<input id="o-emails" data-of="emails" value="${esc(o.emails)}" placeholder="Separate with commas"></label>
+        <label class="f">Phone<input id="o-phone" data-of="phone" value="${esc(o.phone)}"></label></div>
+      <label class="f">Ship-to address<textarea id="o-shipto" data-of="shipTo" rows="3">${esc(o.shipTo)}</textarea></label>
+      <div class="row"><button class="btn small" data-act="copy-ship">Copy ship-to address</button>
+        <a class="btn small" href="https://www.ups.com/ship" target="_blank" rel="noopener">Open UPS</a>
+        <a class="btn small" href="https://www.fedex.com/en-us/shipping.html" target="_blank" rel="noopener">Open FedEx</a></div>
+      ${!match&&QBO.state==="ready"&&o.client?`<div class="note">No QuickBooks customer is named exactly “${esc(o.client)}”. Pick the client from the drop-down list to link it.</div>`:""}
+      <h3 class="sec">Shipments</h3>
+      ${ships?`<div class="tablewrap"><table class="list"><tbody>${ships}</tbody></table></div>`:'<div class="note">Not shipped yet.</div>'}
+      <div class="row" style="align-items:flex-end">
+        <label class="f">Carrier<select id="sh-carrier">${CARRIERS.map(c=>`<option>${c}</option>`).join("")}</select></label>
+        <label class="f">Tracking #<input id="sh-track" class="mono" style="min-width:200px"></label>
+        <label class="f">Date<input id="sh-date" type="date" value="${today()}"></label>
+        <button class="btn small primary" data-act="ship-add">Mark shipped</button></div>
+    </div></div>`;
+}
+
+/* ---------- email results from the shop mailbox ---------- */
+const MAIL_SCOPES=[...SCOPES,"https://graph.microsoft.com/Mail.Send.Shared"];
+const DEFAULT_EMAIL={shopEmail:"shop@midamericameter.com",
+  emailSubject:"Meter test results – {client} – WO {workorders}",
+  emailBody:"Hello,\n\nTesting is complete on {meters} for {client} (work order {workorders}). The test results are attached.\n{tracking}\nPlease let us know if you have any questions.\n\nThank you,\nMid America Meter\n763-478-8041\nshop@midamericameter.com"};
+const emailCfg=k=>(S.settings[k]!==undefined&&S.settings[k]!=="")?S.settings[k]:DEFAULT_EMAIL[k];
+let emailDraft=null;
+function fillTemplate(tpl,o,list){
+  const wos=list.map(m=>m.wo).filter(Boolean);
+  const ship=(o.shipments||[]).filter(s=>s.carrier!=="Customer pickup").slice(-1)[0];
+  const tracking=ship&&ship.tracking?`\nYour meters shipped via ${ship.carrier}. Tracking number: ${ship.tracking}${trackUrl(ship)?"\n"+trackUrl(ship):""}\n`:"";
+  const vals={client:o.client||"",estimate:o.estimate||"",po:o.po||"",count:String(list.length),meters:list.length===1?"1 meter":`${list.length} meters`,workorders:wos.join(", "),tracking};
+  return String(tpl).replace(/\{(\w+)\}/g,(m,k)=>k in vals?vals[k]:m);
+}
+function viewEmail(id){
+  const o=S.orders.get(id);if(!o)return notFound("job");const ms=metersOf(id);
+  if(!emailDraft||emailDraft.jobId!==id){const all=ms.filter(m=>m.status!=="in_progress"||true);
+    emailDraft={jobId:id,to:o.emails||"",cc:"",sel:new Set(all.map(m=>m.id)),xlsx:false};
+    const sel=ms.filter(m=>emailDraft.sel.has(m.id));emailDraft.subject=fillTemplate(emailCfg("emailSubject"),o,sel);emailDraft.body=fillTemplate(emailCfg("emailBody"),o,sel)}
+  const d=emailDraft;const sel=ms.filter(m=>d.sel.has(m.id));
+  return `<div class="stack"><div><div class="crumb"><a href="#jobs">Jobs &amp; meters</a> › <a href="#job-${id}">${esc(o.client)} · ${esc(jobName(o))}</a> › email</div>
+    <div class="row spread"><h1>Email results</h1><div class="row"><button class="btn" data-go="job-${id}">Cancel</button><button class="btn primary" data-act="email-send" data-id="${id}" id="em-send">Send from ${esc(emailCfg("shopEmail"))}</button></div></div></div>
+    <div class="meterlayout"><div class="panel"><div class="bd stack">
+      <div class="note">From: <b>${esc(emailCfg("shopEmail"))}</b></div>
+      <label class="f">To<input id="em-to" value="${esc(d.to)}" placeholder="name@example.com, another@example.com"></label>
+      <label class="f">Cc<input id="em-cc" value="${esc(d.cc)}"></label>
+      <label class="f">Subject<input id="em-subj" value="${esc(d.subject)}"></label>
+      <label class="f">Message<textarea id="em-body" rows="12">${esc(d.body)}</textarea></label>
+      <button class="btn small" data-act="email-refill" data-id="${id}" style="align-self:flex-start">Reset subject and message from the template</button>
+    </div></div>
+    <aside class="panel"><div class="bd stack">
+      <div class="row spread"><h3>Meters in the PDF</h3><span class="row" style="gap:6px"><button class="btn small" data-act="email-all" data-v="1">All</button><button class="btn small" data-act="email-all" data-v="0">None</button></span></div>
+      ${ms.map(m=>{const r=meterResult(normalize(clone(m)));return `<label class="toggle"><input type="checkbox" id="em-m-${m.id}" data-emsel="${m.id}" ${d.sel.has(m.id)?"checked":""}><span><span class="wo">${esc(m.wo)||"—"}</span> ${esc(m.serial)||'<span class="muted">no serial</span>'} ${o.showPassFail!==false?chip(r.overall):""}</span></label>`}).join("")||'<div class="note">This job has no meters.</div>'}
+      <div class="note">${sel.length} of ${ms.length} meters in one combined PDF${sel.some(m=>reportPhotos(m).length)?", with the photos chosen for each report":""}.</div>
+      <label class="toggle"><input type="checkbox" id="em-xlsx" ${d.xlsx?"checked":""}>Also attach Excel results</label>
+      ${(o.emailLog||[]).length?`<div class="note">Last emailed ${new Date(o.emailLog[o.emailLog.length-1].at).toLocaleString()} by ${esc(o.emailLog[o.emailLog.length-1].by)}.</div>`:""}
+    </div></aside></div></div>`;
+}
+function makeXlsxBlob(list,o){
+  const rows=exportRows(list,o);const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=rows[0].map(h=>({wch:Math.max(10,Math.min(28,String(h).length+2))}));
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Results");
+  return new Blob([XLSX.write(wb,{bookType:"xlsx",type:"array"})],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=rej;r.readAsDataURL(b)});
+const splitEmails=s=>String(s||"").split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean);
+async function sendResults(id,btn){
+  const o=S.orders.get(id);const d=emailDraft;if(!o||!d)return;
+  const to=splitEmails(d.to),cc=splitEmails(d.cc);const bad=[...to,...cc].filter(a=>!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a));
+  if(!to.length){toast("Enter at least one email address in To.");return}
+  if(bad.length){toast("Check this address: "+bad[0]);return}
+  const list=metersOf(id).filter(m=>d.sel.has(m.id));
+  if(!list.length){toast("Choose at least one meter for the PDF.");return}
+  btn.disabled=true;btn.textContent="Preparing attachments…";
+  try{
+    const pdf=await pdfFor(list);if(!pdf)throw new Error("The PDF couldn't be made.");
+    const base=`${safeName(o.client)}_${safeName(o.estimate?"Est"+o.estimate:"WO"+list[0].wo)}`;
+    const files=[{name:`${base}_test_results.pdf`,type:"application/pdf",blob:pdf}];
+    if(d.xlsx){if(!window.XLSX)throw new Error("The Excel tool didn't load. Reload and try again.");files.push({name:`${base}_results.xlsx`,type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",blob:makeXlsxBlob(list,o)})}
+    const size=files.reduce((a,f)=>a+f.blob.size,0);
+    if(size>2.8e6)throw new Error(`The attachments are ${(size/1e6).toFixed(1)} MB, more than one email can carry here. Choose fewer meters or fewer report photos and send in two emails.`);
+    btn.textContent="Sending…";
+    const attachments=[];for(const f of files)attachments.push({"@odata.type":"#microsoft.graph.fileAttachment",name:f.name,contentType:f.type,contentBytes:await blobB64(f.blob)});
+    await Store.sendMail({from:emailCfg("shopEmail"),to,cc,subject:d.subject,body:d.body,attachments});
+    const n={...o,emailLog:[...(o.emailLog||[]),{at:Date.now(),by:userName(),to:to.join(", "),cc:cc.join(", "),subject:d.subject,wos:list.map(m=>m.wo),files:files.map(f=>f.name)}]};
+    S.orders.set(id,n);try{await put("orders",id,n)}catch(e){}
+    if(!o.emails&&to.length){n.emails=to.join(", ");try{await put("orders",id,n)}catch(e){}}
+    emailDraft=null;toast("Email sent");go("job-"+id);
+  }catch(e){
+    let msg=e.message||String(e);
+    if(e.status===403||/SendAs|access is denied|ErrorAccessDenied/i.test(msg))msg=`Your account isn't allowed to send as ${emailCfg("shopEmail")}. Ask Hayes to give it Send As permission on that mailbox. (${msg})`;
+    if(/consent|AADSTS65001|interaction_required/i.test(msg))msg="The app needs the Mail.Send.Shared permission in Entra, with admin consent. ("+msg+")";
+    toast("Not sent: "+msg.slice(0,220));btn.disabled=false;btn.textContent="Send from "+emailCfg("shopEmail");
+  }
+}
+function refillEmail(force){
+  if(!emailDraft||(emailDraft.edited&&!force))return;const o=S.orders.get(emailDraft.jobId);if(!o)return;
+  const sel=metersOf(o.id).filter(m=>emailDraft.sel.has(m.id));
+  emailDraft.subject=fillTemplate(emailCfg("emailSubject"),o,sel);emailDraft.body=fillTemplate(emailCfg("emailBody"),o,sel);if(force)emailDraft.edited=false;
+}
+function emailPanel(o){
+  const log=(o.emailLog||[]).slice().reverse();
+  return `<div class="panel"><div class="hd"><h2>Results email</h2><button class="btn primary small" data-go="email-${o.id}">Email results…</button></div>
+    <div class="bd">${log.length?`<div class="tablewrap"><table class="list" style="font-size:13px"><tbody>${log.map(l=>`<tr><td>${new Date(l.at).toLocaleString()}</td><td>${esc(l.to)}${l.cc?`<br><span class="note">cc ${esc(l.cc)}</span>`:""}</td><td class="mono">WO ${esc((l.wos||[]).join(", "))}</td><td class="note">${esc(l.by)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="note">Not emailed yet.</div>'}</div></div>`;
+}
+function emailSettingsPanel(){
+  return `<div class="panel"><div class="hd"><h2>Results email</h2><button class="btn primary small" data-act="save-email">Save</button></div>
+    <div class="bd stack">
+      <label class="f">Send from (shared mailbox)<input id="set-shop" value="${esc(emailCfg("shopEmail"))}" style="max-width:360px"></label>
+      <label class="f">Subject<input id="set-subj" value="${esc(emailCfg("emailSubject"))}"></label>
+      <label class="f">Message<textarea id="set-body" rows="10">${esc(emailCfg("emailBody"))}</textarea></label>
+      <div class="note">These words are filled in for each email: <span class="mono">{client} {estimate} {po} {workorders} {meters} {count} {tracking}</span>. {tracking} becomes the carrier and tracking link once the job is marked shipped, and is left out otherwise. Techs can still edit each email before sending.</div>
+      <div class="row"><button class="btn small" data-act="email-default">Restore the default wording</button></div>
+    </div></div>
+  <div class="panel"><div class="hd"><h2>Customers from QuickBooks</h2></div><div class="bd stack">
+    <div>${QBO.state==="ready"?`${QBO.list.length.toLocaleString()} customers. Imported ${QBO.imported?new Date(QBO.imported).toLocaleString():""}${QBO.importedBy?" by "+esc(QBO.importedBy):""}.`:QBO.state==="none"?"Not imported yet.":QBO.state==="error"?"Couldn't load: "+esc(QBO.err||""):"Loading…"}</div>
+    <label class="btn small" style="align-self:flex-start">Import customer list<input type="file" id="qbo-file" accept=".xlsx,.xls,.csv" hidden></label>
+    <div class="note" id="qbo-progress">${esc(QBO.progress)}</div>
+    <div class="note">In QuickBooks Online, run Reports → Customer Contact List (with Email, Phone, Bill address and Ship address), choose Export to Excel, then import that file here. Importing again replaces the list. Picking a client on a job fills in its contact, email, phone and ship-to address.</div>
+  </div></div>`;
+}
+
 render();start();
 </script>
 </body>
