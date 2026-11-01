@@ -130,6 +130,7 @@ textarea{resize:vertical;min-height:64px}
 .jstat.warn{background:var(--warn-bg);color:var(--warn)}.jstat.info{background:var(--info-bg);color:var(--info)}.jstat.ok{background:var(--accent-soft);color:var(--ink)}.jstat.done{background:var(--pass-bg);color:var(--pass)}
 .sortbtn{font:inherit;font-size:inherit;letter-spacing:inherit;text-transform:inherit;font-weight:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 .sortbtn.on{color:var(--ink)}
+.cf{display:flex;gap:6px;align-items:flex-end;min-width:0}.cf .f{flex:1}.cbtn{padding:8px 10px;flex:none}
 .photos .onrep{display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px;cursor:pointer}
 .photos .onrep input{width:16px;height:16px;accent-color:var(--accent)}
 .paper .photorow{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
@@ -834,9 +835,20 @@ document.addEventListener("click",async e=>{
       if(!window.jspdf){toast("PDF tool didn't load. Reload and try again.");return}
       const doc=new window.jspdf.jsPDF({unit:"pt",format:"letter"});drawReport(doc,histToMeter(h),{client:h.customer,showPassFail:false});offer(`WO${safeName(h.wo)}_${safeName(h.serial)||"meter"}.pdf`,doc.output("blob"));return}
     if(act==="sort"){const k=a.dataset.k;jobSort=jobSort.key===k?{key:k,dir:-jobSort.dir}:{key:k,dir:k==="received"?-1:1};render();return}
-    if(act==="qbo-fill"){const o=S.orders.get(route().id);if(!o)return;const n={...o};if(!fillFromQbo(n,true)){toast(`No QuickBooks customer is named “${o.client}”. Pick the client from the drop-down list.`);return}
+    if(act==="qbo-fill"){const o=S.orders.get(route().id);if(!o)return;const n={...o};if(!fillFromQbo(n,true)){toast(`No QuickBooks customer or saved address for “${o.client}”. Pick the client from the drop-down list.`);return}
       S.orders.set(o.id,n);try{await put("orders",o.id,n);toast("Filled from QuickBooks")}catch(err){toast("Couldn't save: "+err.message)}render();return}
     if(act==="copy-ship"){const o=S.orders.get(route().id);if(!o)return;if(!String(o.shipTo||"").trim()){toast("Enter a ship-to address first.");return}toast(await copyText(shipLabel(o))?"Ship-to address copied":"Couldn't copy. Select the address and copy it by hand.");return}
+    if(act==="copy-field"){const el=$("#sa-"+a.dataset.k);const v=el?el.value.trim():"";if(!v){toast(a.dataset.l+" is empty");return}toast(await copyText(v)?`Copied ${a.dataset.l}: ${v}`:"Couldn't copy. Select the text and copy it by hand.");return}
+    if(act==="addr-save"){const o=S.orders.get(route().id);if(!o||!o.client){toast("Enter the client first.");return}const ad=shipAddr(o);delete ad.check;
+      ADDRBOOK.map[o.client.trim().toLowerCase()]=ad;try{await saveAddrBook();toast(`Saved. New jobs for ${o.client} will use this address.`)}catch(err){toast("Couldn't save: "+err.message)}
+      if(o.ship&&o.ship.check){const n={...o,ship:{...o.ship,check:false}};S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(e){}render()}return}
+    if(act==="save-carriers"){const list=(S.carrierEdit||[]).map(c=>({name:String(c.name||"").trim(),shipUrl:String(c.shipUrl||"").trim(),trackUrl:String(c.trackUrl||"").trim()})).filter(c=>c.name);
+      if(!list.length){toast("Keep at least one carrier.");return}
+      const bad=list.find(c=>(c.shipUrl&&!/^https?:\/\//i.test(c.shipUrl))||(c.trackUrl&&!/^https?:\/\//i.test(c.trackUrl)));if(bad){toast(`${bad.name}: links must start with https://`);return}
+      S.settings.carriers=list;S.carrierEdit=null;try{await putConfig("settings",S.settings);toast("Carriers saved")}catch(err){toast("Couldn't save: "+err.message)}render();return}
+    if(act==="cr-add"){S.carrierEdit.push({name:"",shipUrl:"",trackUrl:""});render();const i=S.carrierEdit.length-1;setTimeout(()=>{const el=document.getElementById("cr-name-"+i);if(el)el.focus()},20);return}
+    if(act==="cr-del"){S.carrierEdit.splice(+a.dataset.i,1);render();return}
+    if(act==="cr-default"){S.carrierEdit=clone(DEFAULT_CARRIERS);render();toast("Defaults restored. Choose Save to keep them.");return}
     if(act==="ship-add"){const o=S.orders.get(route().id);if(!o)return;const carrier=$("#sh-carrier").value,tracking=$("#sh-track").value.trim(),date=$("#sh-date").value;
       if(!tracking&&carrier!=="Customer pickup"){toast("Enter the tracking number.");return}
       const n={...o,shipments:[...(o.shipments||[]),{id:uid("s"),carrier,tracking,date,by:userName(),at:Date.now()}]};S.orders.set(o.id,n);
@@ -905,6 +917,7 @@ document.addEventListener("click",async e=>{
 document.addEventListener("input",e=>{
   const t=e.target;
   if(t.id==="jsearch"){jobSearch=t.value;render();return}
+  if(t.dataset.cr&&S.carrierEdit){const [i,k]=t.dataset.cr.split("|");if(S.carrierEdit[+i])S.carrierEdit[+i][k]=t.value;return}
   if(emailDraft&&/^em-(to|cc|subj|body)$/.test(t.id)){emailDraft[{"em-to":"to","em-cc":"cc","em-subj":"subject","em-body":"body"}[t.id]]=t.value;if(t.id==="em-subj"||t.id==="em-body")emailDraft.edited=true;return}
   if(t.dataset.f&&editing&&!("rerender" in t.dataset)&&t.tagName!=="SELECT"){setPath(editing.draft,t.dataset.f,t.type==="checkbox"?t.checked:t.value);updateLive();scheduleSave()}
 });
@@ -928,6 +941,8 @@ document.addEventListener("change",async e=>{
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
   if(t.id==="jfilter"){jobFilter=t.value;render();return}
+  if(t.dataset.ship){const o=S.orders.get(route().id);if(!o)return;const ad=shipAddr(o);ad[t.dataset.ship]=t.dataset.ship==="state"?t.value.trim().toUpperCase():t.value.trim();
+    const n={...o,ship:ad};S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+err.message)}return}
   if(t.dataset.emsel&&emailDraft){t.checked?emailDraft.sel.add(t.dataset.emsel):emailDraft.sel.delete(t.dataset.emsel);refillEmail(false);render();return}
   if(t.id==="em-xlsx"&&emailDraft){emailDraft.xlsx=t.checked;return}
   if(t.id==="qbo-file"){const f=t.files[0];t.value="";if(!f)return;const pr=$("#qbo-progress");if(pr)pr.textContent="Importing…";
@@ -950,7 +965,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.3.0";
+const APP_VERSION="1.4.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1215,7 +1230,7 @@ function viewHist(wo){
 
 /* ---------- setup & data (on the Limits & lists page) ---------- */
 function viewDataPanel(){
-  return emailSettingsPanel()+viewDataPanel2();
+  return emailSettingsPanel()+carriersPanel()+viewDataPanel2();
 }
 function viewDataPanel2(){
   const links=Object.entries(S.settings.techLinks||{}).map(([e,t])=>`${e} = ${t}`).join("\n");
@@ -1274,28 +1289,34 @@ const sortTh=(key,label,cls="")=>`<th class="${cls}"><button type="button" class
 /* ---------- customers from QuickBooks (SharePoint: MeterTestingApp/customers) ---------- */
 const QBO={state:"idle",list:[],map:new Map(),imported:"",importedBy:"",progress:""};
 function parseQboRows(rows){
-  let h=-1;for(let i=0;i<Math.min(rows.length,30);i++){if((rows[i]||[]).some(c=>/customer full name/i.test(String(c||""))) ){h=i;break}}
+  let h=-1;for(let i=0;i<Math.min(rows.length,30);i++){if((rows[i]||[]).some(c=>/customer full name/i.test(String(c||"")))){h=i;break}}
   if(h<0)for(let i=0;i<Math.min(rows.length,30);i++){if((rows[i]||[]).some(c=>/^(customer|name|display name)$/i.test(String(c||"").trim()))){h=i;break}}
   if(h<0)throw new Error("Couldn't find the header row. Export the Customer Contact List report from QuickBooks.");
   const head=rows[h].map(c=>String(c||"").trim().toLowerCase());
   const col=re=>head.findIndex(c=>re.test(c));
-  const ci={name:col(/customer full name|^customer$|^name$|display name/),phone:col(/phone/),email:col(/e-?mail/),contact:col(/^full name$|contact/),bill:col(/bill/),ship:col(/ship/)};
+  const PART=/street|city|state|zip|postal|country/;
+  const partCol=(pre,part)=>head.findIndex(c=>(pre?pre.test(c):!/ship|bill/.test(c))&&part.test(c));
+  const parts=pre=>({street:partCol(pre,/street|address 1|line ?1/),city:partCol(pre,/city/),state:partCol(pre,/state|province/),zip:partCol(pre,/zip|postal/)});
+  const ci={name:col(/customer full name|^customer$|^name$|display name/),phone:col(/phone/),email:col(/e-?mail/),contact:col(/^full name$|contact/),
+    bill:head.findIndex(c=>/bill/.test(c)&&!PART.test(c)),ship:head.findIndex(c=>/ship/.test(c)&&!PART.test(c))};
+  const sp=parts(/ship/),bp=parts(/bill/),gp=parts(null);
   if(ci.name<0)throw new Error("Couldn't find the customer name column.");
   const out=[];
   for(const r of rows.slice(h+1)){
-    const g=k=>ci[k]>=0?String(r[ci[k]]??"").trim():"";
+    const v=i=>i>=0?String(r[i]??"").trim():"";const g=k=>v(ci[k]);
     const name=g("name");if(!name)continue;
-    const rest=[g("phone"),g("email"),g("bill"),g("ship"),g("contact")].join("");
+    const rest=[g("phone"),g("email"),g("bill"),g("ship"),g("contact"),v(sp.city),v(bp.city),v(gp.city)].join("");
     if(!rest&&/(GMT|\bAM\b|\bPM\b|^\s*(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),)/i.test(name))continue;
-    const emails=g("email").split(/[,;\s]+/).map(s=>s.trim()).filter(s=>/@/.test(s));
-    const phone=g("phone").replace(/\s+/g," ").trim();
+    const emails=g("email").split(/[,;\s]+/).map(x=>x.trim()).filter(x=>/@/.test(x));
+    const pick=p=>{if(p.city<0&&p.zip<0)return null;const st=v(p.street).replace(/\r/g,"").split(/\n+/);const o={street1:st[0]||"",street2:st.slice(1).join(", "),city:v(p.city),state:v(p.state).toUpperCase(),zip:v(p.zip)};return (o.street1||o.city||o.zip)?o:null};
+    const shipParts=pick(sp)||pick(gp)||pick(bp);
     const bill=g("bill").replace(/\r/g,""),ship=g("ship").replace(/\r/g,"");
-    out.push({name,contact:g("contact").replace(/\s+/g," "),phone,emails,bill,ship:ship||bill});
+    out.push({name,contact:g("contact").replace(/\s+/g," "),phone:g("phone").replace(/\s+/g," ").trim(),emails,bill,ship:ship||bill,shipParts});
   }
   return out;
 }
 async function loadQbo(){
-  if(QBO.state==="loading")return;QBO.state="loading";
+  if(QBO.state==="loading")return;QBO.state="loading";loadAddrBook();
   try{const r=await Store.getFile("customers/qbo-customers.json");const j=await r.json();setQbo(j)}
   catch(e){QBO.state=e.status===404?"none":"error";QBO.err=e.message}
   softRender();
@@ -1313,42 +1334,97 @@ async function importQbo(file){
 const qboFor=name=>QBO.map.get(String(name||"").trim().toLowerCase());
 const phoneMain=p=>{const m=String(p||"").match(/Phone:\s*([^A-Za-z]+?)(?=\s+[A-Za-z]+:|$)/);return (m?m[1]:String(p||"")).trim()};
 function fillFromQbo(n,overwrite){
-  const c=qboFor(n.client);if(!c)return false;
+  const c=qboFor(n.client);const saved=ADDRBOOK.map[String(n.client||"").trim().toLowerCase()];
+  if(!c&&!saved)return false;
   const set=(k,v)=>{if(v&&(overwrite||!String(n[k]||"").trim()))n[k]=v};
-  set("contact",c.contact);set("emails",c.emails.join(", "));set("phone",phoneMain(c.phone));set("shipTo",c.ship);
+  if(c){set("contact",c.contact);set("emails",c.emails.join(", "));set("phone",phoneMain(c.phone));set("shipTo",c.ship)}
+  if(overwrite||!n.ship){
+    if(saved)n.ship={...saved};
+    else{const p=c.shipParts?{...c.shipParts,check:!c.shipParts.city}:parseAddr(c.ship);
+      n.ship={company:n.client,attn:c.contact||"",street1:p.street1||"",street2:p.street2||"",city:p.city||"",state:p.state||"",zip:p.zip||"",phone:phoneMain(c.phone),email:c.emails[0]||"",check:!!p.check}}
+  }
   return true;
 }
-
 /* ---------- shipping ---------- */
-const CARRIERS=["UPS","FedEx","Customer pickup","Other"];
-function trackUrl(s){const t=encodeURIComponent(String(s.tracking||"").trim());if(!t)return "";
-  if(s.carrier==="UPS")return "https://www.ups.com/track?tracknum="+t;if(s.carrier==="FedEx")return "https://www.fedex.com/fedextrack/?trknbr="+t;return ""}
-function shipLabel(o){return [o.client,o.contact?"Attn: "+o.contact:"",o.shipTo,o.phone].map(s=>String(s||"").trim()).filter(Boolean).join("\n")}
+const DEFAULT_CARRIERS=[
+  {name:"UPS",shipUrl:"https://www.ups.com/ship",trackUrl:"https://www.ups.com/track?tracknum={tracking}"},
+  {name:"FedEx",shipUrl:"https://www.fedex.com/en-us/shipping.html",trackUrl:"https://www.fedex.com/fedextrack/?trknbr={tracking}"},
+  {name:"SpeeDee",shipUrl:"https://speedeedelivery.com",trackUrl:""}];
+const carriers=()=>Array.isArray(S.settings.carriers)&&S.settings.carriers.length?S.settings.carriers:DEFAULT_CARRIERS;
+const carrierNames=()=>[...carriers().map(c=>c.name),"Customer pickup","Other"];
+function trackUrl(s){
+  const t=String(s.tracking||"").trim();if(!t)return "";const c=carriers().find(x=>x.name===s.carrier);if(!c||!c.trackUrl)return "";
+  return c.trackUrl.includes("{tracking}")?c.trackUrl.split("{tracking}").join(encodeURIComponent(t)):c.trackUrl;
+}
+const ADDR_FIELDS=[["company","Company"],["attn","Attention"],["phone","Phone"],["street1","Street address"],["street2","Address line 2"],["email","Email"],["city","City"],["state","State"],["zip","ZIP"]];
+const STREET_END=/^(.*\b(?:st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|boulevard|way|ct|court|pkwy|parkway|hwy|highway|pl|place|cir|circle|trl|trail|ter|terrace|sq|square|pike|row|loop|run|pass|xing|crossing)\.?(?:\s+\d+[A-Za-z]?)?(?:\s+(?:n|s|e|w|ne|nw|se|sw|north|south|east|west))?\.?(?:\s+(?:suite|ste\.?|unit|#)\s*[\w-]+)?)\s+(.+)$/i;
+const UNIT_START=/^((?:suite|ste\.?|unit|apt\.?|floor|fl\.?|bldg\.?|building|room|rm\.?|#)\s*[\w-]+|\d+(?:st|nd|rd|th)\s+floor)\s+(.+)$/i;
+function parseAddr(str){
+  const a={street1:"",street2:"",city:"",state:"",zip:"",check:false};
+  const s=String(str||"").replace(/\r/g,"").trim().replace(/[,\s]*(USA|U\.S\.A\.|US|United States)\s*$/i,"").trim();
+  if(!s)return a;
+  const lines=s.split(/\n+/).map(x=>x.trim()).filter(Boolean);
+  let last=lines.pop();const m=last.match(/^(.*?)[,\s]+([A-Za-z]{2})\.?\s+(\d{5}(?:-\d{4})?)$/);
+  if(m){a.state=m[2].toUpperCase();a.zip=m[3];last=m[1].replace(/,\s*$/,"").trim()}else a.check=true;
+  if(lines.length){
+    a.street1=lines[0];if(lines.length>1)a.street2=lines.slice(1).join(", ");
+    const u=last.match(UNIT_START);if(u){a.street2=[a.street2,u[1]].filter(Boolean).join(", ");a.city=u[2]}else a.city=last;
+  }else{
+    const po=last.match(/^(p\.?\s*o\.?\s*box\s+[\w-]+)\s+(.+)$/i);
+    const sm=po||last.match(STREET_END);if(sm){a.street1=sm[1];a.city=sm[2];a.check=true}else{a.street1=last;a.check=true}
+  }
+  if(!a.city)a.check=true;
+  return a;
+}
+function shipAddr(o){
+  if(o.ship&&typeof o.ship==="object")return {...o.ship};
+  const p=parseAddr(o.shipTo);
+  return {company:o.client||"",attn:o.contact||"",street1:p.street1,street2:p.street2,city:p.city,state:p.state,zip:p.zip,phone:o.phone||"",email:splitEmails(o.emails)[0]||"",check:p.check};
+}
+function shipLabel(o){const a=shipAddr(o);
+  return [a.company,a.attn?"Attn: "+a.attn:"",a.street1,a.street2,[a.city,[a.state,a.zip].filter(Boolean).join(" ")].filter(Boolean).join(", "),a.phone].map(x=>String(x||"").trim()).filter(Boolean).join("\n")}
 async function copyText(t){
   try{await navigator.clipboard.writeText(t);return true}
   catch(e){const ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand("copy")}catch(x){}ta.remove();return ok}
 }
+/* Saved ship-to addresses, one per client, kept in SharePoint: MeterTestingApp/customers/address-book.json */
+const ADDRBOOK={map:{},state:"idle"};
+async function loadAddrBook(){try{const r=await Store.getFile("customers/address-book.json");ADDRBOOK.map=(await r.json()).addresses||{};ADDRBOOK.state="ready"}catch(e){ADDRBOOK.state=e.status===404?"ready":"error"}}
+async function saveAddrBook(){await Store.putFile("customers/address-book.json",new Blob([JSON.stringify({updated:new Date().toISOString(),by:userName(),addresses:ADDRBOOK.map})],{type:"application/json"}))}
 function contactPanel(o){
+  const a=shipAddr(o);const cs=carriers();
   const ships=(o.shipments||[]).map(s=>{const u=trackUrl(s);return `<tr><td>${fmtDate(s.date)}</td><td>${esc(s.carrier)}</td><td class="mono">${u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(s.tracking)}</a>`:esc(s.tracking)||'<span class="muted">—</span>'}</td><td class="note">${esc(s.by||"")}</td><td><button class="btn small" data-act="ship-del" data-sid="${esc(s.id)}" aria-label="Delete shipment">✕</button></td></tr>`}).join("");
-  const match=qboFor(o.client);
-  return `<div class="panel"><div class="hd"><h2>Contact &amp; shipping</h2><button class="btn small" data-act="qbo-fill" ${QBO.state!=="ready"?"disabled":""} title="${match?"Replace with the QuickBooks details for "+esc(match.name):"No QuickBooks customer with this exact name"}">Fill from QuickBooks</button></div>
+  const match=qboFor(o.client);const saved=ADDRBOOK.map[String(o.client||"").trim().toLowerCase()];
+  return `<div class="panel"><div class="hd"><h2>Contact &amp; shipping</h2><button class="btn small" data-act="qbo-fill" ${QBO.state!=="ready"&&!saved?"disabled":""}>Fill from ${saved?"saved address":"QuickBooks"}</button></div>
     <div class="bd stack">
       <div class="grid g3"><label class="f">Contact<input id="o-contact" data-of="contact" value="${esc(o.contact)}"></label>
-        <label class="f">Email(s)<input id="o-emails" data-of="emails" value="${esc(o.emails)}" placeholder="Separate with commas"></label>
+        <label class="f">Email(s) for results<input id="o-emails" data-of="emails" value="${esc(o.emails)}" placeholder="Separate with commas"></label>
         <label class="f">Phone<input id="o-phone" data-of="phone" value="${esc(o.phone)}"></label></div>
-      <label class="f">Ship-to address<textarea id="o-shipto" data-of="shipTo" rows="3">${esc(o.shipTo)}</textarea></label>
-      <div class="row"><button class="btn small" data-act="copy-ship">Copy ship-to address</button>
-        <a class="btn small" href="https://www.ups.com/ship" target="_blank" rel="noopener">Open UPS</a>
-        <a class="btn small" href="https://www.fedex.com/en-us/shipping.html" target="_blank" rel="noopener">Open FedEx</a></div>
-      ${!match&&QBO.state==="ready"&&o.client?`<div class="note">No QuickBooks customer is named exactly “${esc(o.client)}”. Pick the client from the drop-down list to link it.</div>`:""}
+      <h3 class="sec">Ship to</h3>
+      <div class="note">Click <b>Copy</b> next to a field, then paste it into the matching box on the carrier's site.</div>
+      ${a.street1&&!a.city?'<div class="callout warn">Fill in the city. QuickBooks gave this address on one line and the app couldn\'t tell where the street ends. Fix it here, then choose <b>Save as this client\'s address</b> so it\'s right next time.</div>':a.check&&a.city?'<div class="note">Split from a one-line QuickBooks address. Check the street and city before you ship, then choose <b>Save as this client\'s address</b>.</div>':""}
+      <div class="grid g3">${ADDR_FIELDS.map(([k,l])=>`<div class="cf"><label class="f">${l}<input id="sa-${k}" data-ship="${k}" value="${esc(a[k]||"")}" ${k==="state"||k==="zip"?'class="mono"':""}></label><button type="button" class="btn small cbtn" data-act="copy-field" data-k="${k}" data-l="${l}" aria-label="Copy ${l}">Copy</button></div>`).join("")}</div>
+      <div class="row"><button class="btn small" data-act="copy-ship">Copy whole address</button><button class="btn small" data-act="addr-save">Save as this client's address</button>
+        ${cs.filter(c=>c.shipUrl).map(c=>`<a class="btn small" href="${esc(c.shipUrl)}" target="_blank" rel="noopener">Open ${esc(c.name)}</a>`).join("")}</div>
+      ${!match&&!saved&&QBO.state==="ready"&&o.client?`<div class="note">No QuickBooks customer is named exactly “${esc(o.client)}”. Pick the client from the drop-down list to link it.</div>`:""}
       <h3 class="sec">Shipments</h3>
       ${ships?`<div class="tablewrap"><table class="list"><tbody>${ships}</tbody></table></div>`:'<div class="note">Not shipped yet.</div>'}
       <div class="row" style="align-items:flex-end">
-        <label class="f">Carrier<select id="sh-carrier">${CARRIERS.map(c=>`<option>${c}</option>`).join("")}</select></label>
+        <label class="f">Carrier<select id="sh-carrier">${carrierNames().map(c=>`<option>${esc(c)}</option>`).join("")}</select></label>
         <label class="f">Tracking #<input id="sh-track" class="mono" style="min-width:200px"></label>
         <label class="f">Date<input id="sh-date" type="date" value="${today()}"></label>
         <button class="btn small primary" data-act="ship-add">Mark shipped</button></div>
     </div></div>`;
+}
+function carriersPanel(){
+  if(!S.carrierEdit)S.carrierEdit=clone(carriers());
+  return `<div class="panel"><div class="hd"><h2>Shipping carriers</h2><button class="btn primary small" data-act="save-carriers">Save</button></div><div class="bd stack">
+    <div class="tablewrap"><table class="list"><thead><tr><th>Carrier</th><th>Shipping page (the Open button)</th><th>Tracking link</th><th></th></tr></thead><tbody>
+    ${S.carrierEdit.map((c,i)=>`<tr><td><input id="cr-name-${i}" data-cr="${i}|name" value="${esc(c.name)}" style="min-width:110px"></td><td><input id="cr-ship-${i}" data-cr="${i}|shipUrl" value="${esc(c.shipUrl)}" style="min-width:260px"></td><td><input id="cr-track-${i}" data-cr="${i}|trackUrl" value="${esc(c.trackUrl)}" style="min-width:260px" placeholder="https://…{tracking}…"></td><td><button class="btn small" data-act="cr-del" data-i="${i}" aria-label="Remove carrier">✕</button></td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="row"><button class="btn small" data-act="cr-add">Add carrier</button><button class="btn small" data-act="cr-default">Restore defaults</button></div>
+    <div class="note">Shipping page: sign in to the carrier's website, open the page where you create a shipment, then copy the address from the browser's address bar and paste it here. Tracking link: <span class="mono">{tracking}</span> is replaced by the tracking number. Leave it blank if you don't know it, and tracking numbers will show without a link. "Customer pickup" and "Other" are always available.</div>
+  </div></div>`;
 }
 
 /* ---------- email results from the shop mailbox ---------- */
