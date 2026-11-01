@@ -842,6 +842,16 @@ document.addEventListener("click",async e=>{
     if(act==="addr-save"){const o=S.orders.get(route().id);if(!o||!o.client){toast("Enter the client first.");return}const ad=shipAddr(o);delete ad.check;
       ADDRBOOK.map[o.client.trim().toLowerCase()]=ad;try{await saveAddrBook();toast(`Saved. New jobs for ${o.client} will use this address.`)}catch(err){toast("Couldn't save: "+err.message)}
       if(o.ship&&o.ship.check){const n={...o,ship:{...o.ship,check:false}};S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(e){}render()}return}
+    if(act==="reset-addresses"){if(QBO.state!=="ready"){toast("Import the customer list first.");return}
+      if(!confirmClick(a,"Click again to reset every job's address"))return;a.disabled=true;
+      try{ADDRBOOK.map={};await saveAddrBook();
+        const jobs=[...S.orders.values()];let filled=0,blank=0;
+        for(const o of jobs){const n={...o};delete n.ship;n.shipTo="";const c=qboFor(o.client);
+          if(c){const t={client:o.client};fillFromQbo(t,true);n.ship=t.ship;n.shipTo=t.shipTo||"";filled++}else blank++;
+          a.textContent=`Updating ${filled+blank} of ${jobs.length}…`;S.orders.set(o.id,n);await put("orders",o.id,n)}
+        toast(`Done. ${filled} job${filled===1?"":"s"} updated from QuickBooks${blank?`, ${blank} left blank (no QuickBooks match)`:""}. Saved client addresses cleared.`)}
+      catch(err){toast("Stopped: "+err.message)}
+      render();return}
     if(act==="save-carriers"){const list=(S.carrierEdit||[]).map(c=>({name:String(c.name||"").trim(),shipUrl:String(c.shipUrl||"").trim(),trackUrl:String(c.trackUrl||"").trim()})).filter(c=>c.name);
       if(!list.length){toast("Keep at least one carrier.");return}
       const bad=list.find(c=>(c.shipUrl&&!/^https?:\/\//i.test(c.shipUrl))||(c.trackUrl&&!/^https?:\/\//i.test(c.trackUrl)));if(bad){toast(`${bad.name}: links must start with https://`);return}
@@ -965,7 +975,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.4.0";
+const APP_VERSION="1.4.1";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1524,6 +1534,8 @@ function emailSettingsPanel(){
     <div>${QBO.state==="ready"?`${QBO.list.length.toLocaleString()} customers. Imported ${QBO.imported?new Date(QBO.imported).toLocaleString():""}${QBO.importedBy?" by "+esc(QBO.importedBy):""}.`:QBO.state==="none"?"Not imported yet.":QBO.state==="error"?"Couldn't load: "+esc(QBO.err||""):"Loading…"}</div>
     <label class="btn small" style="align-self:flex-start">Import customer list<input type="file" id="qbo-file" accept=".xlsx,.xls,.csv" hidden></label>
     <div class="note" id="qbo-progress">${esc(QBO.progress)}</div>
+    <div class="row"><button class="btn small" data-act="reset-addresses" ${QBO.state==="ready"?"":"disabled"}>Reset all job addresses from QuickBooks</button></div>
+    <div class="note">Use after importing a new customer list. It clears every saved client address and replaces the ship-to address on every job with the one from QuickBooks, or leaves it blank if QuickBooks has none. Contacts, emails and phone numbers on jobs aren't changed. Addresses typed by hand on jobs are replaced.</div>
     <div class="note">In QuickBooks Online, run Reports → Customer Contact List (with Email, Phone, Bill address and Ship address), choose Export to Excel, then import that file here. Importing again replaces the list. Picking a client on a job fills in its contact, email, phone and ship-to address.</div>
   </div></div>`;
 }
