@@ -127,9 +127,22 @@ textarea{resize:vertical;min-height:64px}
 .photos img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
 .photos button{position:absolute;top:4px;right:4px}
 .jstat{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700;white-space:nowrap;background:var(--surface-2);color:var(--muted)}
-.jstat.warn{background:var(--warn-bg);color:var(--warn)}.jstat.info{background:var(--info-bg);color:var(--info)}.jstat.ok{background:var(--accent-soft);color:var(--ink)}.jstat.done{background:var(--pass-bg);color:var(--pass)}
+.jstat.warn{background:var(--warn-bg);color:var(--warn)}.jstat.info{background:var(--info-bg);color:var(--info)}.jstat.ok{background:var(--accent-soft);color:var(--ink)}.jstat.done{background:var(--line);color:var(--ink)}
 .sortbtn{font:inherit;font-size:inherit;letter-spacing:inherit;text-transform:inherit;font-weight:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 .sortbtn.on{color:var(--ink)}
+.jstat.approved{background:var(--pass-bg);color:var(--pass);box-shadow:inset 0 0 0 1.5px var(--pass)}
+#acbox{position:absolute;z-index:40;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:4px;display:flex;flex-direction:column;max-width:min(460px,calc(100vw - 32px))}
+#acbox[hidden]{display:none!important}
+#acbox button{font:inherit;font-size:15px;text-align:left;background:none;border:0;border-radius:6px;padding:9px 10px;color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#acbox button:hover,#acbox button.on{background:var(--accent-soft)}
+#cam{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
+#cam video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}
+#cam .cam-bar{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;padding:14px max(16px,env(safe-area-inset-left,0px)) calc(14px + env(safe-area-inset-bottom,0px));background:#111;color:#eee}
+#cam .cam-snap{font-size:18px;padding:12px 28px}
+#cam-note{font-size:14px;min-width:200px;text-align:center}
+#cam-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+#cam-flash.go{animation:camflash .35s ease-out}
+@keyframes camflash{from{opacity:.8}to{opacity:0}}
 .cf{display:flex;gap:6px;align-items:flex-end;min-width:0}.cf .f{flex:1}.cbtn{padding:8px 10px;flex:none}
 .photos .onrep{display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px;cursor:pointer}
 .photos .onrep input{width:16px;height:16px;accent-color:var(--accent)}
@@ -240,7 +253,7 @@ const jobName=o=>o?(o.estimate?`Est. ${o.estimate}`:(o.workOrder?`Job ${o.workOr
 
 /* ---------- accuracy logic ---------- */
 function points(m){
-  if(m.custom)return (m.points||[]).map((p,i)=>{const lo=num(p.low),hi=num(p.high);return{label:p.name||`Test ${i+1}`,lim:lo!==null&&hi!==null?[lo,hi]:null}});
+  if(m.custom)return (m.points||[]).map((p,i)=>{const lo=num(p.low),hi=num(p.high);return{label:p.name||`Test ${i+1}`,lim:lo!==null&&hi!==null?[lo,hi]:null,internal:!!p.internal}});
   return STD.map(r=>({label:r.label,lim:((m.limitsUsed||{})[r.k])||(S.limits[m.type]||{})[r.k]||null}));
 }
 function testPct(t,calc){
@@ -253,13 +266,13 @@ function evalTests(m,which){
   return points(m).map((pt,i)=>{
     const t=arr[i]||{};const pct=testPct(t,!m.pctDirect);let pass=null;
     if(pct!==null&&pt.lim){const p=Math.round(pct*100)/100;pass=p>=pt.lim[0]-1e-9&&p<=pt.lim[1]+1e-9}
-    return {label:pt.label,gpm:num(t.gpm),pct,lim:pt.lim,pass};
+    return {label:pt.label,gpm:num(t.gpm),pct,lim:pt.lim,pass,internal:!!pt.internal,_i:i};
   });
 }
 function meterResult(m){
   const before=evalTests(m,"before");
   const after=m.calibrated?evalTests(m,"after"):null;
-  const final=after||before;
+  const final=(after||before).filter(t=>!t.internal);
   let overall="incomplete";
   if(!final.length||(!m.custom&&!m.type))overall="incomplete";
   else if(final.some(t=>t.pass===false))overall="fail";
@@ -351,11 +364,12 @@ function viewJobs(){
 function jobFields(o,pre,data){
   const a=o.approval||"";
   return `<label class="f">Job status<select id="${pre}-status" ${data?'data-of="status"':""}>${JOB_STATUSES.map(x=>`<option ${jobStatus(o)===x?"selected":""}>${esc(x)}</option>`).join("")}</select></label>
-    <label class="f">Client<input id="${pre}-client" ${data?'data-of="client"':""} list="dl-clients" value="${esc(o.client)}"></label>
+    <label class="f">Client<input id="${pre}-client" ${data?'data-of="client"':""} data-ac="clients" autocomplete="off" value="${esc(o.client)}"></label>
     <label class="f">QBO estimate #<input id="${pre}-est" ${data?'data-of="estimate"':""} value="${esc(o.estimate)}"></label>
     <label class="f">Client PO #<input id="${pre}-po" ${data?'data-of="po"':""} value="${esc(o.po)}" placeholder="If the client sent one"></label>
     <label class="f">Approval<select id="${pre}-appr" ${data?'data-of="approval"':""}>${["",...Object.keys(APPROVAL)].map(k=>`<option value="${k}" ${a===k?"selected":""}>${k?APPROVAL[k]:"Choose…"}</option>`).join("")}</select></label>
     <label class="f">Received<input id="${pre}-rec" type="date" ${data?'data-of="received"':""} value="${esc(o.received)}"></label>
+    <label class="f">After testing<select id="${pre}-disp" ${data?'data-of="disposition"':""}>${["return","scrap"].map(k=>`<option value="${k}" ${(o.disposition||"return")===k?"selected":""}>${DISP_SHORT[k]}</option>`).join("")}</select></label>
     <label class="f">Pass/fail on client reports<select id="${pre}-pf" ${data?'data-of="showPassFail"':""}><option value="1" ${o.showPassFail!==false?"selected":""}>Show</option><option value="0" ${o.showPassFail===false?"selected":""}>Hide (client asked)</option></select></label>`;
 }
 function newJobForm(){
@@ -374,7 +388,7 @@ function viewJob(id){
     return `<tr class="click" data-go="meter-${m.id}"><td data-stop><input type="checkbox" id="sel-${m.id}" data-sel="${m.id}" ${S.sel.has(m.id)?"checked":""} aria-label="Select meter ${esc(m.serial)}"></td>
     <td><span class="wo">${esc(m.wo)||"—"}</span></td><td class="mono"><b>${esc(m.serial)||'<span class="muted">no serial</span>'}</b></td><td>${esc(m.size)}</td><td>${esc(tl(m.type))}${m.custom?' <span class="note">custom</span>':""}</td>
     <td class="accs">${accList(normalize(clone(m)))}</td>
-    <td>${chip(r.overall)}${r.usedAfter?' <span class="note">after cal.</span>':""}</td><td>${fmtDate(m.testDate)}</td><td>${esc(m.tech)}</td><td><span class="st ${m.status}">${STATUS[m.status]||""}</span></td></tr>`}).join("");
+    <td>${chip(r.overall)}${r.usedAfter?' <span class="note">after cal.</span>':""}</td><td>${fmtDate(m.testDate)}</td><td>${esc(m.tech)}</td><td><span class="st ${m.status}">${STATUS[m.status]||""}</span></td><td data-stop><label class="toggle" style="font-size:13px"><input type="checkbox" id="ret-${m.id}" data-ret="${m.id}" ${effDisp(m,o)==="return"?"checked":""}>${effDisp(m,o)==="return"?"Return":"<b style='color:var(--fail)'>Scrap</b>"}</label></td></tr>`}).join("");
   const selN=ms.filter(m=>S.sel.has(m.id)).length;
   return `<div class="stack">
     <div><div class="crumb"><a href="#jobs">Jobs &amp; meters</a></div>
@@ -384,13 +398,14 @@ function viewJob(id){
     <div class="panel"><div class="hd"><h2>Meters <span class="muted" style="font-weight:600">(${ms.length})</span></h2>
       <div class="row"><span class="note">${selN?`${selN} selected`:"Exports include all meters unless you tick some"}</span>
       <button class="btn small" data-act="xlsx" data-id="${id}">Excel</button><button class="btn small" data-act="csv" data-id="${id}">CSV</button><button class="btn small" data-act="pdfs" data-id="${id}">PDF reports</button></div></div>
-    <div class="tablewrap"><table class="list"><thead><tr><th><input type="checkbox" id="selall" data-selall="${id}" aria-label="Select all" ${ms.length&&selN===ms.length?"checked":""}></th><th>WO</th><th>Serial</th><th>Size</th><th>Type</th><th>Accuracy %</th><th>Result</th><th>Tested</th><th>Tech</th><th>Status</th></tr></thead>
-    <tbody>${rows||`<tr><td colspan="10"><div class="empty">No meters on this job yet. Choose <b>Add meter</b>.</div></td></tr>`}</tbody></table></div></div>
+    <div class="tablewrap"><table class="list"><thead><tr><th><input type="checkbox" id="selall" data-selall="${id}" aria-label="Select all" ${ms.length&&selN===ms.length?"checked":""}></th><th>WO</th><th>Serial</th><th>Size</th><th>Type</th><th>Accuracy %</th><th>Result</th><th>Tested</th><th>Tech</th><th>Status</th><th title="Untick to scrap this meter">Return</th></tr></thead>
+    <tbody>${rows||`<tr><td colspan="11"><div class="empty">No meters on this job yet. Choose <b>Add meter</b>.</div></td></tr>`}</tbody></table></div></div>
     <div class="row"><button class="btn small danger" data-act="del-job" data-id="${id}">Delete job</button></div>
   </div>`;
 }
 function notFound(what){return `<div class="empty">That ${what} isn't here any more. <a href="#jobs">Back to jobs</a></div>`}
 function datalists(){
+  return "";
   const L=S.lists;const dl=(id,a)=>`<datalist id="dl-${id}">${(a||[]).map(v=>`<option value="${esc(v)}">`).join("")}</datalist>`;
   return dl("clients",QBO.state==="ready"&&QBO.list.length?QBO.list.map(c=>c.name):[...new Set([...(L.clients||[]),...HIST.customers])])+dl("techs",L.techs)+dl("sizes",L.sizes)+dl("mfr",L.manufacturers)+dl("models",L.models)+dl("regs",L.registrations)+dl("locs",L.locations);
 }
@@ -400,19 +415,20 @@ function viewMeter(id){
   if(!editing||editing.id!==id){const m=S.meters.get(id);if(!m)return notFound("meter");editing={id,draft:normalize(clone(m)),dirty:false,removed:new Set()}}
   const m=editing.draft;const o=S.orders.get(m.orderId)||{};
   const inp=(path,label,opts={})=>{const v=getPath(m,path)??"";const idd="f-"+path.replace(/\./g,"-");
-    return `<label class="f">${label}<input id="${idd}" data-f="${path}" value="${esc(v)}" ${opts.list?`list="dl-${opts.list}"`:""} ${opts.num?'inputmode="decimal" class="num mono"':""} ${opts.type?`type="${opts.type}"`:""} ${opts.ph?`placeholder="${esc(opts.ph)}"`:""}></label>`};
+    return `<label class="f">${label}<input id="${idd}" data-f="${path}" value="${esc(v)}" ${opts.list?`data-ac="${opts.list}" autocomplete="off"`:""} ${opts.num?'inputmode="decimal" class="num mono"':""} ${opts.type?`type="${opts.type}"`:""} ${opts.ph?`placeholder="${esc(opts.ph)}"`:""}></label>`};
   const sel=(path,label,opts,rerender)=>{const v=getPath(m,path)??"";return `<label class="f">${label}<select id="f-${path}" data-f="${path}" ${rerender?"data-rerender":""}><option value="">Choose…</option>${opts.map(x=>`<option ${x===v?"selected":""}>${esc(x)}</option>`).join("")}</select></label>`};
   const pts=points(m);
   const testRows=which=>pts.map((pt,i)=>{const t=(m[which]||[])[i]||{};
     const cell=(k)=>`<td><input id="f-${which}-${i}-${k}" data-f="${which}.${i}.${k}" value="${esc(t[k]??"")}" inputmode="decimal" class="num mono"></td>`;
-    return `<tr><td class="rate"><b id="lbl-${which}-${i}">${esc(pt.label)}</b><span id="rng-${which}-${i}">${rangeTxt(pt.lim)}</span></td>${cell("gpm")}
+    return `<tr><td class="rate"><b id="lbl-${which}-${i}">${esc(pt.label)}</b>${pt.internal?'<span class="chip none" style="margin-left:4px">internal only</span>':""}<span id="rng-${which}-${i}">${rangeTxt(pt.lim)}</span></td>${cell("gpm")}
       ${!m.pctDirect?cell("start")+cell("end")+cell("vol")+`<td><input id="f-${which}-${i}-calc" readonly class="num mono" data-calc="${which}-${i}" tabindex="-1"></td>`:cell("pct")}
       <td class="res" data-res="${which}-${i}"></td></tr>`}).join("");
   const testHead=`<tr><th>Test</th><th>GPM</th>${!m.pctDirect?"<th>Start read</th><th>End read</th><th>Test volume</th><th>Percent</th>":"<th>Percent</th>"}<th class="res">AWWA</th></tr>`;
-  const ptEditor=m.custom?`<div class="callout info">Custom test points: name each test and set its accuracy limits. Up to ${MAXPTS} tests.</div>
-    <div class="tablewrap"><table class="pts"><thead><tr><th></th><th>Test name</th><th>Low %</th><th>High %</th><th></th></tr></thead><tbody>
+  const ptEditor=m.custom?`<div class="callout info">Custom test points: name each test and set its accuracy limits. Up to ${MAXPTS} tests. Tick <b>Internal only</b> to keep a test off the client report, PDF and Excel; it also doesn't count toward the overall pass/fail.</div>
+    <div class="tablewrap"><table class="pts"><thead><tr><th></th><th>Test name</th><th>Low %</th><th>High %</th><th>Internal only</th><th></th></tr></thead><tbody>
     ${(m.points||[]).map((p,i)=>`<tr><td class="n">${i+1}</td><td><input id="f-pt-${i}-name" data-f="points.${i}.name" value="${esc(p.name)}" placeholder="e.g. Low register, 1.5 GPM"></td>
       <td><input id="f-pt-${i}-low" data-f="points.${i}.low" value="${esc(p.low)}" inputmode="decimal" class="num mono" style="width:90px"></td><td><input id="f-pt-${i}-high" data-f="points.${i}.high" value="${esc(p.high)}" inputmode="decimal" class="num mono" style="width:90px"></td>
+      <td style="text-align:center"><input type="checkbox" id="f-pt-${i}-int" data-f="points.${i}.internal" data-rerender ${p.internal?"checked":""} aria-label="Test ${i+1} internal only" style="width:18px;height:18px;accent-color:var(--accent)"></td>
       <td><button class="btn small" data-act="rm-pt" data-i="${i}" ${(m.points||[]).length<=1?"disabled":""} aria-label="Remove test ${i+1}">Remove</button></td></tr>`).join("")}
     </tbody></table></div><div><button class="btn small" data-act="add-pt" ${(m.points||[]).length>=MAXPTS?"disabled":""}>Add test point</button></div>`:"";
   const ms=metersOf(m.orderId);const idx=ms.findIndex(x=>x.id===id);
@@ -426,6 +442,7 @@ function viewMeter(id){
   <div class="meterlayout"><div class="panel"><div class="bd stack" id="meterform">
     <h3>Work order</h3>
     <div class="grid g3">${inp("wo","Work order #",{num:true})}${sel("instructions","Instructions",S.lists.instructions||DEFAULT_LISTS.instructions)}
+      <label class="f">After testing<select id="f-disposition" data-f="disposition"><option value="" ${!m.disposition?"selected":""}>Same as job (${DISP_SHORT[(o.disposition||"return")]})</option>${["return","scrap"].map(k=>`<option value="${k}" ${m.disposition===k?"selected":""}>${DISP_SHORT[k]}</option>`).join("")}</select></label>
       <div class="f" style="display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted)">Tested in<div class="seg" role="group" aria-label="Tested in">${["Shop","Field"].map(x=>`<button type="button" data-act="setting" data-v="${x}" class="${(m.setting||"Shop")===x?"on":""}">${x}</button>`).join("")}</div></div>
       ${inp("dateIn","Date in",{type:"date"})}${inp("dateOut","Date out",{type:"date"})}</div>
     ${dupWo?'<div class="callout warn">Another meter already has this work order number.</div>':""}
@@ -453,7 +470,7 @@ function viewMeter(id){
     <h3 class="sec">Photos</h3>
     <div class="photos" id="photos">${photos}</div>
     <div class="row">
-      <label class="btn small primary">Take photo<input type="file" id="f-camera" accept="image/*" capture="environment" hidden></label>
+      ${useInAppCamera()?'<button type="button" class="btn small primary" data-act="camera">Take photo</button>':'<label class="btn small primary">Take photo<input type="file" id="f-camera" accept="image/*" capture="environment" hidden></label>'}
       <label class="btn small">Choose photos<input type="file" id="f-photo" accept="image/*" multiple hidden></label>
       <button type="button" class="btn small" data-act="phone-qr">Use my phone</button>
       <button type="button" class="btn small" data-act="photo-folder">Open photo folder</button>
@@ -541,7 +558,7 @@ function reportHTML(m,o){
     <div class="ttl">Meter Test Results</div>
     <div><b>Tested for:</b> ${esc(o.client)}</div>
     <div class="sh">Work Order Information</div>
-    <table class="kv"><tr><td>Work Order:</td><td>${esc(m.wo)}</td></tr>${o.po?`<tr><td>PO Number:</td><td>${esc(o.po)}</td></tr>`:""}<tr><td>Test Date:</td><td>${fmtDate(m.testDate)}</td></tr><tr><td>Tested by:</td><td>${esc(m.tech)}</td></tr></table>
+    <table class="kv"><tr><td>Work Order:</td><td>${esc(m.wo)}</td></tr>${o.po?`<tr><td>PO Number:</td><td>${esc(o.po)}</td></tr>`:""}<tr><td>Test Date:</td><td>${fmtDate(m.testDate)}</td></tr><tr><td>Tested by:</td><td>${esc(m.tech)}</td></tr>${m.legacy?"":`<tr><td>Disposition:</td><td>${DISP_LABEL[effDisp(m,o)]}</td></tr>`}</table>
     <div class="sh">Meter Information</div>
     <table class="kv" style="width:100%"><tr><td>Size:</td><td>${esc(m.size)}</td><td>Serial Number:</td><td>${esc(m.serial)}</td></tr>
       <tr><td>Manufacturer:</td><td>${esc(m.mfr)}</td><td>Unit of Measure:</td><td>${esc(m.registration)}</td></tr>
@@ -554,7 +571,7 @@ function reportHTML(m,o){
     <div class="sh">Test Results</div>
     <table>${m.calibrated?`<tr><th></th><th colspan="${span}">Before</th><th colspan="${span}">After</th></tr>`:""}
       <tr><th>Test</th><th class="r">GPM</th><th class="r">Percent</th>${pf?"<th>AWWA</th>":""}${m.calibrated?`<th class="r">GPM</th><th class="r">Percent</th>${pf?"<th>AWWA</th>":""}`:""}</tr>
-      ${r.before.map(tRow).join("")}</table>
+      ${r.before.map((b,i)=>b.internal?"":tRow(b,i)).join("")}</table>
     ${stmt?`<div class="stmt">${stmt}</div>`:""}
     <div class="sh">Parts</div><div style="white-space:pre-wrap;min-height:30px">${esc(m.parts)}</div>
     <div class="sh">Comments</div><div style="white-space:pre-wrap;min-height:30px">${esc(m.comments)}</div>
@@ -573,7 +590,7 @@ function drawReport(doc,m,o){
   const sec=t=>{y+=22;B(11.5);doc.text(t,L,y);doc.setDrawColor(150);doc.line(L,y+4,558,y+4);y+=17};
   const kv=(k,v,x)=>{N(10.5);doc.setTextColor(80);doc.text(k,x,y);doc.setTextColor(0);doc.text(String(v??""),x+92,y)};
   sec("Work Order Information");
-  const wi=[["Work Order:",m.wo]];if(o.po)wi.push(["PO Number:",o.po]);wi.push(["Test Date:",fmtDate(m.testDate)],["Tested by:",m.tech]);
+  const wi=[["Work Order:",m.wo]];if(o.po)wi.push(["PO Number:",o.po]);wi.push(["Test Date:",fmtDate(m.testDate)],["Tested by:",m.tech]);if(!m.legacy)wi.push(["Disposition:",DISP_LABEL[effDisp(m,o)]]);
   wi.forEach((p,i)=>{if(i)y+=14;kv(p[0],p[1],L)});
   sec("Meter Information");
   [["Size:",m.size,"Serial Number:",m.serial],["Manufacturer:",m.mfr,"Unit of Measure:",m.registration],["Model:",m.model,"Location:",m.location||"None Listed"],["Type:",tl(m.type),"",""]]
@@ -588,7 +605,7 @@ function drawReport(doc,m,o){
   grp("before");if(m.calibrated)grp("after");
   B(10);if(m.calibrated){doc.text("Before",cols[0].x-30,y);doc.text("After",cols.find(c=>c.w==="after").x-30,y);y+=13}
   doc.text("Test",L,y);cols.forEach(c=>{if(c.k==="pf")doc.text("AWWA",c.x,y);else doc.text(c.k==="gpm"?"GPM":"Percent",c.x,y,{align:"right"})});
-  r.before.forEach((bt,i)=>{y+=14;N(10.5);doc.text(doc.splitTextToSize(bt.label,160)[0],L,y);cols.forEach(c=>{const t=(c.w==="after"?r.after:r.before)[i];
+  r.before.forEach((bt,i)=>{if(bt.internal)return;y+=14;N(10.5);doc.text(doc.splitTextToSize(bt.label,160)[0],L,y);cols.forEach(c=>{const t=(c.w==="after"?r.after:r.before)[i];
     if(c.k==="pf"){if(t.pass!==null)doc.text(t.pass?"Pass":"Fail",c.x,y)}else{const v=c.k==="gpm"?t.gpm:t.pct;if(v!==null)doc.text(f2(v),c.x,y,{align:"right"})}})});
   if(pf&&r.overall!=="incomplete"){y+=22;B(11);doc.text(r.overall==="pass"?"This Meter meets or exceeds the AWWA standards.":"This Meter does not meet the AWWA standards.",L,y)}
   const FOOT=748;
@@ -623,8 +640,8 @@ async function pdfFor(list){
 function exportRows(list,o){
   list=list.map(m=>normalize(clone(m)));
   const anyComp=list.some(m=>m.type==="Compound"),anyCal=list.some(m=>m.calibrated),pf=o.showPassFail!==false,anyReads=list.some(m=>!m.pctDirect),anyCustom=list.some(m=>m.custom);
-  const N=Math.max(3,...list.map(m=>points(m).length));
-  const head=["Client","QBO Estimate","PO","Work Order","Serial Number","Size","Manufacturer","Model","Meter Type","Unit of Measure","Meter Location","Instructions","Date In","Date Out","Shop/Field","Test Date","Tested By","Beginning Read","Ending Read"];
+  const N=Math.max(1,...list.map(m=>points(m).filter(p=>!p.internal).length));
+  const head=["Client","QBO Estimate","PO","Work Order","Serial Number","Size","Manufacturer","Model","Meter Type","Unit of Measure","Meter Location","Instructions","Date In","Date Out","Shop/Field","Disposition","Test Date","Tested By","Beginning Read","Ending Read"];
   if(anyComp)head.push("Low Begin","Low End","High Begin","High End");
   const grp=pre=>{for(let i=0;i<N;i++){const p=pre+(anyCustom?`Test ${i+1}`:STD[i].label);if(anyCustom)head.push(p+" Name");head.push(p+" Flow Rate (GPM)");if(pf)head.push(p+" AWWA Low %",p+" AWWA High %");if(anyReads)head.push(p+" Beg Read",p+" End Read",p+" Test Volume");head.push(p+" Accuracy %");if(pf)head.push(p+" Pass/Fail")}};
   const width=(anyCustom?1:0)+1+(pf?2:0)+(anyReads?3:0)+1+(pf?1:0);
@@ -632,12 +649,12 @@ function exportRows(list,o){
   if(pf)head.push("Overall Pass/Fail");head.push("Parts","Comments");
   const rd=v=>v===null?null:Math.round(v*100)/100;
   const rows=list.map(m=>{const r=meterResult(m);
-    const row=[o.client,o.estimate||"",o.po||"",m.wo,m.serial,m.size,m.mfr,m.model,tl(m.type),m.registration,m.location,m.instructions||"",fmtDate(m.dateIn),fmtDate(m.dateOut),m.setting||"Shop",fmtDate(m.testDate),m.tech,num(m.reads.begin),num(m.reads.end)];
+    const row=[o.client,o.estimate||"",o.po||"",m.wo,m.serial,m.size,m.mfr,m.model,tl(m.type),m.registration,m.location,m.instructions||"",fmtDate(m.dateIn),fmtDate(m.dateOut),m.setting||"Shop",DISP_SHORT[effDisp(m,o)],fmtDate(m.testDate),m.tech,num(m.reads.begin),num(m.reads.end)];
     if(anyComp)row.push(num(m.reads.lowBegin),num(m.reads.lowEnd),num(m.reads.highBegin),num(m.reads.highEnd));
     const cells=(which,tests)=>{for(let i=0;i<N;i++){const t=tests&&tests[i];if(!t){for(let k=0;k<width;k++)row.push(null);continue}
-      const raw=(m[which]||[])[i]||{};if(anyCustom)row.push(t.label);row.push(t.gpm);if(pf)row.push(t.lim?t.lim[0]:null,t.lim?t.lim[1]:null);
+      const raw=(m[which]||[])[t._i]||{};if(anyCustom)row.push(t.label);row.push(t.gpm);if(pf)row.push(t.lim?t.lim[0]:null,t.lim?t.lim[1]:null);
       if(anyReads)row.push(m.pctDirect?null:num(raw.start),m.pctDirect?null:num(raw.end),m.pctDirect?null:num(raw.vol));row.push(rd(t.pct));if(pf)row.push(t.pass===null?"":t.pass?"Pass":"Fail")}};
-    cells("before",r.before);if(anyCal)cells("after",m.calibrated?r.after:null);
+    cells("before",r.before.filter(t=>!t.internal));if(anyCal)cells("after",m.calibrated?r.after.filter(t=>!t.internal):null);
     if(pf)row.push(r.overall==="pass"?"Pass":r.overall==="fail"?"Fail":"");
     row.push(m.parts||"",m.comments||"");return row});
   return [head,...rows];
@@ -812,13 +829,13 @@ async function createMeter(oid,copyFrom){
   const prev=copyFrom||metersOf(oid).slice(-1)[0];const o=S.orders.get(oid)||{};
   const m={id:uid("m"),orderId:oid,wo:nextWo(),serial:"",size:"",mfr:"",model:"",type:"",registration:"USG",location:"",instructions:"",setting:"Shop",dateIn:o.received||today(),dateOut:"",testDate:today(),tech:S.myTech||"",
     reads:{},pctDirect:false,custom:false,calibrated:false,before:[],after:[],parts:"",comments:"",photos:[],status:"in_progress",question:"",answer:"",createdAt:Date.now(),updatedAt:Date.now()};
-  if(prev){["size","mfr","model","type","registration","location","tech","pctDirect","instructions","setting","dateIn","custom"].forEach(k=>{if(prev[k]!==undefined)m[k]=prev[k]});
+  if(prev){["size","mfr","model","type","registration","tech","pctDirect","instructions","setting","dateIn","custom"].forEach(k=>{if(prev[k]!==undefined)m[k]=prev[k]});
     if(prev.custom)m.points=clone(prev.points||[]);
     m.before=(prev.before||[]).map(t=>({gpm:t.gpm||"",pct:"",start:"",end:"",vol:t.vol||""}));}
   normalize(m);
   let newId;try{newId=await createRec("meters",m)}catch(e){toast("Couldn't add the meter: "+(e.message||e.code));return}
   go("meter-"+newId);
-  setTimeout(()=>{const s=document.getElementById("f-serial");if(s)s.focus()},30);
+  setTimeout(()=>{const s=document.getElementById(copyFrom?"f-location":"f-serial");if(s)s.focus()},30);
 }
 function confirmClick(btn,label){if(btn.dataset.armed){return true}btn.dataset.armed="1";const old=btn.textContent;btn.textContent=label;btn.classList.add("armed");setTimeout(()=>{if(btn.isConnected){delete btn.dataset.armed;btn.textContent=old;btn.classList.remove("armed")}},3500);return false}
 
@@ -849,6 +866,10 @@ document.addEventListener("click",async e=>{
       if(nj&&!$("#newjob").hidden){nj.value=name;$("#nj-hint").innerHTML="";return}
       const o=S.orders.get(route().id);if(!o)return;const n={...o,client:name};fillFromQbo(n,false);S.orders.set(o.id,n);
       try{await put("orders",o.id,n);toast("Linked to QuickBooks customer "+name)}catch(err){toast("Couldn't save: "+err.message)}render();return}
+    if(act==="camera"){openCamera();return}
+    if(act==="cam-snap"){camSnap();return}
+    if(act==="cam-switch"){if(CAM.devices.length>1){CAM.idx=(CAM.idx+1)%CAM.devices.length;camStart()}return}
+    if(act==="cam-close"){closeCamera();return}
     if(act==="copy-field"){const el=$("#sa-"+a.dataset.k);const v=el?el.value.trim():"";if(!v){toast(a.dataset.l+" is empty");return}toast(await copyText(v)?`Copied ${a.dataset.l}: ${v}`:"Couldn't copy. Select the text and copy it by hand.");return}
     if(act==="addr-save"){const o=S.orders.get(route().id);if(!o||!o.client){toast("Enter the client first.");return}const ad=shipAddr(o);delete ad.check;
       ADDRBOOK.map[o.client.trim().toLowerCase()]=ad;try{await saveAddrBook();toast(`Saved. New jobs for ${o.client} will use this address.`)}catch(err){toast("Couldn't save: "+err.message)}
@@ -880,7 +901,7 @@ document.addEventListener("click",async e=>{
         if(autoMatch(client,m)){client=m[0].name;toast("Using the QuickBooks name: "+client)}
         else if(m.length&&!a.dataset.anyway){$("#nj-hint").innerHTML=clientHint(client)+`<div class="row"><button class="btn small" data-act="create-job" ${a.dataset.meter?'data-meter="1"':""} data-anyway="1">Create with “${esc(client)}” anyway</button></div>`;toast("Check the client name first.");return}}
       const st=$("#nj-status").value;
-      const o={id:uid("o"),client,status:st,statusLog:[{status:st,at:Date.now(),by:userName()}],estimate:$("#nj-est").value.trim(),po:$("#nj-po").value.trim(),approval:$("#nj-appr").value,received:$("#nj-rec").value,showPassFail:$("#nj-pf").value==="1",createdAt:Date.now()};
+      const o={id:uid("o"),client,status:st,statusLog:[{status:st,at:Date.now(),by:userName()}],estimate:$("#nj-est").value.trim(),po:$("#nj-po").value.trim(),approval:$("#nj-appr").value,disposition:$("#nj-disp").value,received:$("#nj-rec").value,showPassFail:$("#nj-pf").value==="1",createdAt:Date.now()};
       fillFromQbo(o,false);
       try{await createRec("orders",o)}catch(err){toast("Couldn't create the job: "+(err.message||err.code));return}
       if(a.dataset.meter)await createMeter(o.id);else go("job-"+o.id);
@@ -901,10 +922,11 @@ document.addEventListener("click",async e=>{
     else if(act==="status"){const s=a.dataset.s;const m=editing.draft;
       if(s==="question"&&!String(m.question||"").trim()){toast("Type the question first.");$("#f-question").focus();return}
       m.status=s;if(s==="approved"&&!m.custom)m.limitsUsed=clone(S.limits[m.type]||null);if(s==="in_progress")delete m.limitsUsed;scheduleSave();await flushSave();
-      const b=$("#stbadge");if(b){b.className="st "+s;b.textContent=STATUS[s]}$("#stbtns").innerHTML=statusButtons(m);toast(STATUS[s])}
-    else if(act==="approve"){const m=S.meters.get(id);if(m){const n={...m,status:"approved",updatedAt:Date.now()};if(!m.custom)n.limitsUsed=clone(S.limits[m.type]||null);try{await put("meters",id,n);S.meters.set(id,n);render()}catch(err){toast("Couldn't approve: "+(err.message||err.code))}}}
+      const b=$("#stbadge");if(b){b.className="st "+s;b.textContent=STATUS[s]}$("#stbtns").innerHTML=statusButtons(m);toast(STATUS[s]);if(s==="approved")await checkJobApproved(m.orderId)}
+    else if(act==="approve"){const m=S.meters.get(id);if(m){const n={...m,status:"approved",updatedAt:Date.now()};if(!m.custom)n.limitsUsed=clone(S.limits[m.type]||null);try{await put("meters",id,n);S.meters.set(id,n);await checkJobApproved(n.orderId);render()}catch(err){toast("Couldn't approve: "+(err.message||err.code))}}}
     else if(act==="approve-ready"){const list=[...S.meters.values()].filter(m=>m.status==="ready"&&(!reviewTech||m.tech===reviewTech));
       for(const m of list){try{const n={...m,status:"approved",updatedAt:Date.now()};if(!m.custom)n.limitsUsed=clone(S.limits[m.type]||null);await put("meters",m.id,n);S.meters.set(m.id,n)}catch(err){toast("Stopped: "+(err.message||err.code));break}}
+      for(const oid of new Set(list.map(m=>m.orderId)))await checkJobApproved(oid);
       render();toast(`Approved ${list.length} meters`)}
     else if(act==="del-meter"){if(!confirmClick(a,"Click again to delete"))return;const m=editing.draft;clearTimeout(saveTimer);editing=null;await del("meters",m.id);S.meters.delete(m.id);go("job-"+m.orderId)}
     else if(act==="del-job"){if(!confirmClick(a,"Click again: deletes all its meters"))return;for(const m of metersOf(id)){await del("meters",m.id);S.meters.delete(m.id)}await del("orders",id);S.orders.delete(id);go("jobs")}
@@ -940,7 +962,7 @@ document.addEventListener("change",async e=>{
   if(t.dataset.f&&editing&&/^(before|after)\.\d+\.(start|end)$/.test(t.dataset.f)){chainReads(t.dataset.f)}
   if(t.dataset.f&&editing&&t.tagName==="SELECT"&&!("rerender" in t.dataset)){setPath(editing.draft,t.dataset.f,t.value);scheduleSave();return}
   if(t.dataset.f&&editing&&("rerender" in t.dataset)){setPath(editing.draft,t.dataset.f,t.type==="checkbox"?t.checked:t.value);normalize(editing.draft);scheduleSave();render();return}
-  if(t.dataset.of){const o=S.orders.get(route().id);if(!o)return;const n={...o,[t.dataset.of]:t.dataset.of==="showPassFail"?t.value==="1":t.value};
+  if(t.dataset.of){const o=S.orders.get(route().id);if(!o)return;if(t.dataset.of==="phone")t.value=formatPhone(t.value);const n={...o,[t.dataset.of]:t.dataset.of==="showPassFail"?t.value==="1":t.value};
     if(t.dataset.of==="status")n.statusLog=[...(o.statusLog||[]),{status:t.value,at:Date.now(),by:userName()}];
     if(t.dataset.of==="client"){const m=qboFor(n.client)?[]:qboMatches(n.client);if(autoMatch(n.client,m)){n.client=m[0].name;toast("Using the QuickBooks name: "+n.client)}
       if(fillFromQbo(n,false))toast((autoMatch(t.value,m)?"Using the QuickBooks name: "+n.client+". ":"")+"Filled contact and ship-to from QuickBooks")}S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+(err.message||err.code))}render();return}
@@ -949,15 +971,15 @@ document.addEventListener("change",async e=>{
   if(t.id==="rtech"){reviewTech=t.value;render();return}
   if(t.id==="t-who"){timeWho=t.value;try{localStorage.setItem("mam-who",t.value)}catch(err){}render();return}
   if(t.id==="pf-from"||t.id==="pf-to"){if(t.id==="pf-from")perfFrom=t.value;else perfTo=t.value;if(perfFrom&&perfTo)render();return}
-  if((t.id==="f-photo"||t.id==="f-camera")&&editing){const files=[...t.files];t.value="";const ed=editing;
-    for(const f of files){try{toast("Uploading photo…");const blob=await shrink(f);const r=await Store.putFile(`photos/WO${safeName(ed.draft.wo)||"no-number"}/${Date.now()}.jpg`,blob);ed.draft.photos.push({itemId:r.id,name:f.name,webUrl:r.webUrl||"",addedAt:Date.now(),by:userName()});if(editing===ed){scheduleSave();await flushSave();showPhotos()}}catch(err){toast("Photo upload failed: "+(err.message||"error"))}}
-    toast(files.length>1?"Photos added":"Photo added")}
+  if((t.id==="f-photo"||t.id==="f-camera")&&editing){const files=[...t.files];t.value="";await addPhotoBlobs(files.map(f=>({blob:f,name:f.name,raw:true})));return}
   if(t.dataset.onrep!==undefined&&editing){const i=+t.dataset.onrep;const ph=editing.draft.photos[i];if(!ph)return;
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
   if(t.id==="jfilter"){jobFilter=t.value;render();return}
+  if(t.dataset.ret){const m=S.meters.get(t.dataset.ret);const o=m&&S.orders.get(m.orderId);if(!m)return;const want=t.checked?"return":"scrap";
+    const n={...m,disposition:want===((o&&o.disposition)||"return")?"":want};S.meters.set(m.id,n);try{await put("meters",m.id,n)}catch(err){toast("Couldn't save: "+err.message)}render();return}
   if(t.id==="nj-client"){const h=$("#nj-hint");if(h)h.innerHTML=clientHint(t.value);return}
-  if(t.dataset.ship){const o=S.orders.get(route().id);if(!o)return;const ad=shipAddr(o);ad[t.dataset.ship]=t.dataset.ship==="state"?t.value.trim().toUpperCase():t.value.trim();
+  if(t.dataset.ship){const o=S.orders.get(route().id);if(!o)return;if(t.dataset.ship==="phone")t.value=formatPhone(t.value);const ad=shipAddr(o);ad[t.dataset.ship]=t.dataset.ship==="state"?t.value.trim().toUpperCase():t.value.trim();
     const n={...o,ship:ad};S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+err.message)}return}
   if(t.dataset.emsel&&emailDraft){t.checked?emailDraft.sel.add(t.dataset.emsel):emailDraft.sel.delete(t.dataset.emsel);refillEmail(false);render();return}
   if(t.id==="em-xlsx"&&emailDraft){emailDraft.xlsx=t.checked;return}
@@ -981,7 +1003,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.5.0";
+const APP_VERSION="1.6.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1290,8 +1312,8 @@ function histHits(q){
     </tbody></table></div></div>`;
 }
 /* ---------- job status ---------- */
-const JOB_STATUSES=["Not received","Needs evaluation","Waiting for approval","Needs followup","Ready for service","Service in progress","Service complete","Ready to ship","Complete"];
-const JS_TONE={"Not received":"none","Needs evaluation":"warn","Waiting for approval":"warn","Needs followup":"warn","Ready for service":"info","Service in progress":"info","Service complete":"ok","Ready to ship":"ok","Complete":"done"};
+const JOB_STATUSES=["Not received","Needs evaluation","Waiting for approval","Needs followup","Ready for service","Service in progress","Service complete","Approved by manager","Ready to ship","Complete"];
+const JS_TONE={"Not received":"none","Needs evaluation":"warn","Waiting for approval":"warn","Needs followup":"warn","Ready for service":"info","Service in progress":"info","Service complete":"ok","Approved by manager":"approved","Ready to ship":"ok","Complete":"done"};
 const jobStatus=o=>JOB_STATUSES.includes(o&&o.status)?o.status:"Not received";
 const jsChip=o=>{const s=jobStatus(o);return `<span class="jstat ${JS_TONE[s]}">${esc(s)}</span>`};
 let jobSort={key:"status",dir:1},jobFilter="open";
@@ -1371,11 +1393,11 @@ function fillFromQbo(n,overwrite){
   const c=qboFor(n.client);const saved=ADDRBOOK.map[String(n.client||"").trim().toLowerCase()];
   if(!c&&!saved)return false;
   const set=(k,v)=>{if(v&&(overwrite||!String(n[k]||"").trim()))n[k]=v};
-  if(c){set("contact",c.contact);set("emails",c.emails.join(", "));set("phone",phoneMain(c.phone));set("shipTo",c.ship)}
+  if(c){set("contact",c.contact);set("emails",c.emails.join(", "));set("phone",formatPhone(phoneMain(c.phone)));set("shipTo",c.ship)}
   if(overwrite||!n.ship){
     if(saved)n.ship={...saved};
     else{const p=c.shipParts?{...c.shipParts,check:!c.shipParts.city}:parseAddr(c.ship);
-      n.ship={company:n.client,attn:c.contact||"",street1:p.street1||"",street2:p.street2||"",city:p.city||"",state:p.state||"",zip:p.zip||"",phone:phoneMain(c.phone),email:c.emails[0]||"",check:!!p.check}}
+      n.ship={company:n.client,attn:c.contact||"",street1:p.street1||"",street2:p.street2||"",city:p.city||"",state:p.state||"",zip:p.zip||"",phone:formatPhone(phoneMain(c.phone)),email:c.emails[0]||"",check:!!p.check}}
   }
   return true;
 }
@@ -1561,6 +1583,121 @@ function emailSettingsPanel(){
     <div class="note">In QuickBooks Online, run Reports → Customer Contact List (with Email, Phone, Bill address and Ship address), choose Export to Excel, then import that file here. Importing again replaces the list. Picking a client on a job fills in its contact, email, phone and ship-to address.</div>
   </div></div>`;
 }
+
+/* ---------- meter disposition (return or scrap) ---------- */
+const DISP_LABEL={return:"Returned to customer",scrap:"Scrapped at customer's request"};
+const DISP_SHORT={return:"Return to customer",scrap:"Scrap meter"};
+const effDisp=(m,o)=>(m&&m.disposition)||(o&&o.disposition)||"return";
+
+/* ---------- phone format: 763-478-8041 x123 ---------- */
+function formatPhone(v){
+  const s=String(v||"").trim();if(!s)return "";
+  const em=s.match(/^(.*?)(?:\s*(?:ext\.?|extension|x|#)\s*(\d+))\s*$/i);const main=em?em[1]:s,ext=em?em[2]:"";
+  let d=main.replace(/\D/g,"");if(d.length===11&&d[0]==="1")d=d.slice(1);
+  if(d.length!==10)return s;
+  return `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}${ext?" x"+ext:""}`;
+}
+
+/* ---------- manager approval -> job status ---------- */
+const APPROVED_STATUS="Approved by manager";
+async function checkJobApproved(oid){
+  const o=S.orders.get(oid);if(!o)return;const ms=metersOf(oid);
+  if(!ms.length||!ms.every(m=>m.status==="approved"))return;
+  if(JOB_STATUSES.indexOf(jobStatus(o))>=JOB_STATUSES.indexOf(APPROVED_STATUS))return;
+  const n={...o,status:APPROVED_STATUS,statusLog:[...(o.statusLog||[]),{status:APPROVED_STATUS,at:Date.now(),by:userName(),auto:true}]};
+  S.orders.set(oid,n);try{await put("orders",oid,n);toast(`All meters approved: ${o.client} is now “${APPROVED_STATUS}”`)}catch(e){toast("Couldn't update the job status: "+e.message)}
+}
+
+/* ---------- photos: shared upload + in-app camera for Chromebooks ---------- */
+async function addPhotoBlobs(items){
+  const ed=editing;if(!ed)return;let n=0;
+  for(const it of items){
+    try{toast("Uploading photo…");const blob=it.raw?await shrink(it.blob):it.blob;
+      const r=await Store.putFile(`photos/WO${safeName(ed.draft.wo)||"no-number"}/${Date.now()}.jpg`,blob);
+      ed.draft.photos.push({itemId:r.id,name:it.name||"photo.jpg",webUrl:r.webUrl||"",addedAt:Date.now(),by:userName()});n++;
+      if(editing===ed){scheduleSave();await flushSave();showPhotos()}}
+    catch(err){toast("Photo upload failed: "+(err.message||"error"))}
+  }
+  if(n)toast(n>1?`${n} photos added`:"Photo added");
+}
+const useInAppCamera=()=>/CrOS/.test(navigator.userAgent)&&!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+const CAM={stream:null,devices:[],idx:-1,count:0};
+async function openCamera(){
+  if(!editing)return;closeCamera();CAM.count=0;
+  const ov=document.createElement("div");ov.id="cam";
+  ov.innerHTML=`<video id="cam-v" playsinline autoplay muted></video><div id="cam-flash"></div>
+    <div class="cam-bar"><button class="btn" data-act="cam-close">Done</button><span id="cam-note">Starting the camera…</span>
+    <button class="btn primary cam-snap" data-act="cam-snap" aria-label="Take picture">Snap</button><button class="btn" data-act="cam-switch">Switch camera</button></div>`;
+  document.body.appendChild(ov);await camStart();
+}
+async function camStart(){
+  if(CAM.stream){CAM.stream.getTracks().forEach(t=>t.stop());CAM.stream=null}
+  const dev=CAM.devices[CAM.idx];
+  const video=dev?{deviceId:{exact:dev.deviceId},width:{ideal:1920},height:{ideal:1080}}:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}};
+  try{
+    CAM.stream=await navigator.mediaDevices.getUserMedia({video,audio:false});
+    const v=$("#cam-v");if(!v){camStop();return}v.srcObject=CAM.stream;
+    CAM.devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");
+    if(CAM.idx<0){const cur=CAM.stream.getVideoTracks()[0].getSettings().deviceId;CAM.idx=Math.max(0,CAM.devices.findIndex(d=>d.deviceId===cur))}
+    const sw=document.querySelector('[data-act="cam-switch"]');if(sw)sw.hidden=CAM.devices.length<2;
+    camNote();
+  }catch(e){
+    closeCamera();
+    if(e&&e.name==="NotAllowedError")toast("Camera access is blocked. Allow the camera for this site in Chrome's address bar, or use Choose photos.");
+    else{toast("Couldn't start the camera, opening files instead.");const f=$("#f-photo");if(f)f.click()}
+  }
+}
+function camNote(){const el=$("#cam-note");if(el)el.textContent=CAM.count?`${CAM.count} photo${CAM.count>1?"s":""} added to WO ${editing?editing.draft.wo:""}`:"Point the camera at the meter and press Snap"}
+async function camSnap(){
+  const v=$("#cam-v");if(!v||!v.videoWidth)return;
+  const sc=Math.min(1,1600/Math.max(v.videoWidth,v.videoHeight));const c=document.createElement("canvas");c.width=Math.round(v.videoWidth*sc);c.height=Math.round(v.videoHeight*sc);
+  c.getContext("2d").drawImage(v,0,0,c.width,c.height);
+  const fl=$("#cam-flash");if(fl){fl.classList.remove("go");void fl.offsetWidth;fl.classList.add("go")}
+  const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",.85));if(!blob)return;
+  CAM.count++;camNote();await addPhotoBlobs([{blob,name:"camera.jpg"}]);
+}
+function camStop(){if(CAM.stream){CAM.stream.getTracks().forEach(t=>t.stop());CAM.stream=null}}
+function closeCamera(){camStop();const ov=$("#cam");if(ov)ov.remove()}
+
+/* ---------- autocomplete for client, tech, size and other lists ---------- */
+const AC_SRC={clients:()=>QBO.state==="ready"&&QBO.list.length?QBO.list.map(c=>c.name):[...new Set([...(S.lists.clients||[]),...HIST.customers])],
+  techs:()=>S.lists.techs||[],sizes:()=>S.lists.sizes||[],mfr:()=>S.lists.manufacturers||[],models:()=>S.lists.models||[],regs:()=>S.lists.registrations||[],locs:()=>S.lists.locations||[]};
+const AC_MIN=3,AC_MAX=6,AC_SHORT=40;
+function acMatches(key,q){
+  const all=(AC_SRC[key]||(()=>[]))();q=String(q||"").trim().toLowerCase();
+  if(all.length>AC_SHORT&&q.length<AC_MIN)return [];
+  if(!q)return all.slice(0,AC_MAX);
+  const sc=[];for(const v of all){const l=String(v).toLowerCase();const s=l.startsWith(q)?0:(" "+l.replace(/[^a-z0-9]+/g," ")).includes(" "+q)?1:l.includes(q)?2:-1;if(s>=0)sc.push([s,v])}
+  return sc.sort((a,b)=>a[0]-b[0]||String(a[1]).localeCompare(String(b[1]))).slice(0,AC_MAX).map(x=>x[1]);
+}
+const AC={el:null,items:[],idx:-1};
+function acBox(){let b=document.getElementById("acbox");if(!b){b=document.createElement("div");b.id="acbox";b.setAttribute("role","listbox");b.hidden=true;document.body.appendChild(b)}return b}
+function acHide(){const b=document.getElementById("acbox");if(b)b.hidden=true;AC.el=null;AC.items=[];AC.idx=-1}
+function acShow(el){
+  const items=acMatches(el.dataset.ac,el.value);
+  if(!items.length||(items.length===1&&items[0]===el.value)){acHide();return}
+  AC.el=el;AC.items=items;AC.idx=-1;const b=acBox();
+  b.innerHTML=items.map((v,i)=>`<button type="button" role="option" data-aci="${i}">${esc(v)}</button>`).join("");
+  const r=el.getBoundingClientRect();b.style.left=(r.left+window.scrollX)+"px";b.style.top=(r.bottom+window.scrollY+2)+"px";b.style.minWidth=Math.max(r.width,220)+"px";b.hidden=false;
+}
+function acPaint(){const b=document.getElementById("acbox");if(!b)return;b.querySelectorAll("button").forEach((x,i)=>x.classList.toggle("on",i===AC.idx))}
+function acChoose(i){
+  const el=AC.el,v=AC.items[i];if(!el||v===undefined)return;acHide();
+  el.value=v;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));
+}
+document.addEventListener("focusin",e=>{const t=e.target;if(t&&t.dataset&&t.dataset.ac)acShow(t)});
+document.addEventListener("input",e=>{const t=e.target;if(t&&t.dataset&&t.dataset.ac&&t===document.activeElement)acShow(t)},true);
+document.addEventListener("focusout",e=>{if(e.target===AC.el)setTimeout(()=>{if(document.activeElement!==AC.el)acHide()},150)});
+document.addEventListener("pointerdown",e=>{const o=e.target.closest&&e.target.closest("#acbox [data-aci]");if(o){e.preventDefault();acChoose(+o.dataset.aci)}},true);
+document.addEventListener("keydown",e=>{
+  if(!AC.el||e.target!==AC.el||document.getElementById("acbox").hidden)return;
+  if(e.key==="ArrowDown"){e.preventDefault();AC.idx=Math.min(AC.items.length-1,AC.idx+1);acPaint()}
+  else if(e.key==="ArrowUp"){e.preventDefault();AC.idx=Math.max(0,AC.idx-1);acPaint()}
+  else if(e.key==="Enter"&&AC.idx>=0){e.preventDefault();e.stopImmediatePropagation();acChoose(AC.idx)}
+  else if(e.key==="Escape"){acHide()}
+},true);
+window.addEventListener("scroll",()=>{if(AC.el)acHide()},{passive:true});
+window.addEventListener("hashchange",acHide);
 
 render();start();
 </script>
