@@ -230,7 +230,7 @@ const STATUS={in_progress:"In progress",ready:"Ready for review",question:"Quest
 const APPROVAL={po:"PO received",verbal:"Verbal approval",waiting:"Waiting"};
 
 /* ---------- state ---------- */
-const S={orders:new Map(),meters:new Map(),limits:DEFAULT_LIMITS,lists:DEFAULT_LISTS,loadedO:false,loadedM:false,sel:new Set(),settings:{woFloor:17489,techLinks:{}},configIds:{},myTech:""};
+const S={orders:new Map(),meters:new Map(),limits:DEFAULT_LIMITS,lists:DEFAULT_LISTS,loadedO:false,loadedM:false,sel:new Set(),settings:{woFloor:17489,techLinks:{}},configIds:{},myTech:"",newMeters:new Map()};
 let mode="loading";
 let editing=null;
 let saveTimer=null,saving=Promise.resolve();
@@ -304,7 +304,7 @@ function render(){
   $("#nav").hidden=mode!=="ready";
   const app=$("#app");
   if(mode!=="ready"){app.innerHTML=viewGate();return}
-  if(r.v!=="meter"&&editing){editing=null}
+  if(r.v!=="meter"&&editing){if(editing.isNew&&!editing.touched)S.newMeters.delete(editing.id);editing=null}
   if(r.v==="jobs")app.innerHTML=viewJobs();
   else if(r.v==="job")app.innerHTML=viewJob(r.id);
   else if(r.v==="meter"){app.innerHTML=viewMeter(r.id);updateLive();fillPhotos()}
@@ -412,7 +412,8 @@ function datalists(){
 
 /* ----- meter entry ----- */
 function viewMeter(id){
-  if(!editing||editing.id!==id){const m=S.meters.get(id);if(!m)return notFound("meter");editing={id,draft:normalize(clone(m)),dirty:false,removed:new Set()}}
+  if(!editing||editing.id!==id){const nm=S.newMeters.get(id);const m=S.meters.get(id)||nm;if(!m)return notFound("meter");
+    editing={id,draft:normalize(clone(m)),dirty:false,removed:new Set(),isNew:!!nm,touched:false,woAuto:!!nm}}
   const m=editing.draft;const o=S.orders.get(m.orderId)||{};
   const inp=(path,label,opts={})=>{const v=getPath(m,path)??"";const idd="f-"+path.replace(/\./g,"-");
     return `<label class="f">${label}<input id="${idd}" data-f="${path}" value="${esc(v)}" ${opts.list?`data-ac="${opts.list}" autocomplete="off"`:""} ${opts.num?'inputmode="decimal" class="num mono"':""} ${opts.type?`type="${opts.type}"`:""} ${opts.ph?`placeholder="${esc(opts.ph)}"`:""}></label>`};
@@ -435,9 +436,9 @@ function viewMeter(id){
   const dupWo=m.wo&&[...S.meters.values()].some(x=>x.id!==m.id&&String(x.wo)===String(m.wo));
   const photos=photosHTML(m);
   return `<div class="stack">
-  <div><div class="crumb"><a href="#jobs">Jobs &amp; meters</a> › <a href="#job-${m.orderId}">${esc(o.client)} · ${esc(jobName(o))}</a> › meter ${idx+1} of ${ms.length}</div>
+  <div><div class="crumb"><a href="#jobs">Jobs &amp; meters</a> › <a href="#job-${m.orderId}">${esc(o.client)} · ${esc(jobName(o))}</a> › ${editing.isNew?"new meter":`meter ${idx+1} of ${ms.length}`}</div>
   <div class="row spread"><h1>WO <span class="mono" id="h-wo">${esc(m.wo)||"—"}</span> · <span class="mono" id="h-serial">${esc(m.serial)||"no serial"}</span></h1>
-   <div class="row"><span class="savestate" id="savestate">${editing.dirty?"Unsaved changes":"All changes saved"}</span>
+   <div class="row"><span class="savestate" id="savestate">${editing.isNew&&!editing.touched?"Not saved until you enter something":editing.dirty?"Unsaved changes":"All changes saved"}</span>
    ${idx>0?`<button class="btn small" data-go="meter-${ms[idx-1].id}">‹ Previous</button>`:""}${idx<ms.length-1?`<button class="btn small" data-go="meter-${ms[idx+1].id}">Next ›</button>`:""}</div></div></div>
   <div class="meterlayout"><div class="panel"><div class="bd stack" id="meterform">
     <h3>Work order</h3>
@@ -447,12 +448,12 @@ function viewMeter(id){
       ${inp("dateIn","Date in",{type:"date"})}${inp("dateOut","Date out",{type:"date"})}</div>
     ${dupWo?'<div class="callout warn">Another meter already has this work order number.</div>':""}
     <h3 class="sec">Test information</h3>
-    <div class="grid g3">${inp("testDate","Test date",{type:"date"})}${inp("tech","Tested by",{list:"techs"})}${inp("location","Meter location",{list:"locs"})}</div>
+    <div class="grid g3">${inp("testDate","Test date",{type:"date"})}${inp("tech","Tested by",{list:"techs"})}</div>
     <h3 class="sec">Meter information</h3>
     <div class="grid g3">
       ${inp("serial","Serial number")}${inp("size","Size",{list:"sizes"})}
       <label class="f">Meter type${m.custom?"":" (sets AWWA limits)"}<select id="f-type" data-f="type" data-rerender><option value="">Choose…</option>${TYPES.map(t=>`<option value="${t}" ${m.type===t?"selected":""}>${esc(tl(t))}</option>`).join("")}</select></label>
-      ${inp("mfr","Manufacturer",{list:"mfr"})}${inp("model","Model",{list:"models"})}${inp("registration","Unit of measure",{list:"regs"})}
+      ${inp("mfr","Manufacturer",{list:"mfr"})}${inp("model","Model",{list:"models"})}${inp("registration","Unit of measure",{list:"regs"})}${inp("location","Meter location",{list:"locs"})}
     </div>
     <h3 class="sec">Register readings</h3>
     <div class="grid g4">${inp("reads.begin","Beginning",{num:true})}${inp("reads.end","Ending",{num:true})}</div>
@@ -528,13 +529,22 @@ function chainReads(path){
   updateLive();scheduleSave();
 }
 function setSaveState(t){const e=$("#savestate");if(e)e.textContent=t}
-function scheduleSave(){if(!editing)return;editing.dirty=true;setSaveState("Saving…");clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,800)}
+function scheduleSave(){if(!editing)return;editing.dirty=true;editing.touched=true;setSaveState("Saving…");clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,800)}
 function flushSave(){
   clearTimeout(saveTimer);
   if(!editing||!editing.dirty)return saving;
-  mergeRemotePhotos(editing);const d=clone(editing.draft);d.updatedAt=Date.now();editing.dirty=false;const ed=editing;
-  saving=saving.then(()=>put("meters",d.id,d)).then(()=>{if(editing===ed&&!ed.dirty)setSaveState("All changes saved")})
-    .catch(e=>{ed.dirty=true;setSaveState("Not saved");toast("Couldn't save: "+(e&&e.code==="invalid_argument"?"you have view-only access to this page.":(e&&e.message)||"try again."))});
+  const ed=editing;ed.dirty=false;
+  saving=saving.then(async()=>{
+    mergeRemotePhotos(ed);
+    if(ed.isNew){
+      const tmp=ed.id;
+      if(ed.woAuto&&[...S.meters.values()].some(x=>String(x.wo)===String(ed.draft.wo))){ed.draft.wo=nextWo();const w=document.getElementById("f-wo");if(w&&editing===ed)w.value=ed.draft.wo;const h=document.getElementById("h-wo");if(h&&editing===ed)h.textContent=ed.draft.wo}
+      const d=clone(ed.draft);d.updatedAt=Date.now();const nid=await createRec("meters",d);
+      ed.isNew=false;ed.id=nid;ed.draft.id=nid;S.newMeters.delete(tmp);
+      if(editing===ed&&location.hash==="#meter-"+tmp)history.replaceState(null,"","#meter-"+nid);
+    }else{const d=clone(ed.draft);d.updatedAt=Date.now();await put("meters",d.id,d)}
+  }).then(()=>{if(editing===ed&&!ed.dirty)setSaveState("All changes saved")})
+    .catch(e=>{ed.dirty=true;setSaveState("Not saved");toast("Couldn't save: "+((e&&e.message)||"try again."))});
   return saving;
 }
 
@@ -825,17 +835,13 @@ function viewPerf(){
 }
 
 /* ---------- actions ---------- */
-async function createMeter(oid,copyFrom){
-  const prev=copyFrom||metersOf(oid).slice(-1)[0];const o=S.orders.get(oid)||{};
-  const m={id:uid("m"),orderId:oid,wo:nextWo(),serial:"",size:"",mfr:"",model:"",type:"",registration:"USG",location:"",instructions:"",setting:"Shop",dateIn:o.received||today(),dateOut:"",testDate:today(),tech:S.myTech||"",
+async function createMeter(oid){
+  const o=S.orders.get(oid)||{};const tmp="new"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  const m={id:tmp,orderId:oid,wo:nextWo(),serial:"",size:"",mfr:"",model:"",type:"",registration:"",location:"",instructions:"",setting:"Shop",dateIn:o.received||today(),dateOut:"",testDate:today(),tech:S.myTech||"",
     reads:{},pctDirect:false,custom:false,calibrated:false,before:[],after:[],parts:"",comments:"",photos:[],status:"in_progress",question:"",answer:"",createdAt:Date.now(),updatedAt:Date.now()};
-  if(prev){["size","mfr","model","type","registration","tech","pctDirect","instructions","setting","dateIn","custom"].forEach(k=>{if(prev[k]!==undefined)m[k]=prev[k]});
-    if(prev.custom)m.points=clone(prev.points||[]);
-    m.before=(prev.before||[]).map(t=>({gpm:t.gpm||"",pct:"",start:"",end:"",vol:t.vol||""}));}
-  normalize(m);
-  let newId;try{newId=await createRec("meters",m)}catch(e){toast("Couldn't add the meter: "+(e.message||e.code));return}
-  go("meter-"+newId);
-  setTimeout(()=>{const s=document.getElementById(copyFrom?"f-location":"f-serial");if(s)s.focus()},30);
+  normalize(m);S.newMeters.set(tmp,m);
+  go("meter-"+tmp);
+  setTimeout(()=>{const s=document.getElementById("f-serial");if(s)s.focus()},30);
 }
 function confirmClick(btn,label){if(btn.dataset.armed){return true}btn.dataset.armed="1";const old=btn.textContent;btn.textContent=label;btn.classList.add("armed");setTimeout(()=>{if(btn.isConnected){delete btn.dataset.armed;btn.textContent=old;btn.classList.remove("armed")}},3500);return false}
 
@@ -907,9 +913,11 @@ document.addEventListener("click",async e=>{
       if(a.dataset.meter)await createMeter(o.id);else go("job-"+o.id);
     }
     else if(act==="add-meter")createMeter(id);
-    else if(act==="save-close"){const oid=editing.draft.orderId;editing.dirty=true;setSaveState("Saving…");await flushSave();if(editing&&editing.dirty)return;toast("Saved");go("job-"+oid)}
-    else if(act==="next-meter"){await flushSave();createMeter(editing.draft.orderId,editing.draft)}
-    else if(act==="report"){await flushSave();S.meters.set(editing.id,clone(editing.draft));go("report-"+editing.id)}
+    else if(act==="save-close"){const oid=editing.draft.orderId;
+      if(editing.isNew&&!editing.touched){S.newMeters.delete(editing.id);toast("Nothing was entered, so no meter was added");go("job-"+oid);return}
+      editing.dirty=true;setSaveState("Saving…");await flushSave();if(editing&&editing.dirty)return;toast("Saved");go("job-"+oid)}
+    else if(act==="next-meter"){const oid=editing.draft.orderId;if(editing.isNew&&!editing.touched){toast("This meter is still blank. Enter it first.");return}await flushSave();if(editing&&editing.dirty)return;createMeter(oid)}
+    else if(act==="report"){if(editing.isNew&&!editing.touched){toast("Enter the meter details first.");return}await flushSave();S.meters.set(editing.id,clone(editing.draft));go("report-"+editing.id)}
     else if(act==="setting"){editing.draft.setting=a.dataset.v;scheduleSave();a.parentNode.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b===a))}
     else if(["time-start","time-stop","time-del","time-add"].includes(act))timeAction(act,a);
     else if(act==="time-csv")timeCsv();
@@ -928,10 +936,11 @@ document.addEventListener("click",async e=>{
       for(const m of list){try{const n={...m,status:"approved",updatedAt:Date.now()};if(!m.custom)n.limitsUsed=clone(S.limits[m.type]||null);await put("meters",m.id,n);S.meters.set(m.id,n)}catch(err){toast("Stopped: "+(err.message||err.code));break}}
       for(const oid of new Set(list.map(m=>m.orderId)))await checkJobApproved(oid);
       render();toast(`Approved ${list.length} meters`)}
-    else if(act==="del-meter"){if(!confirmClick(a,"Click again to delete"))return;const m=editing.draft;clearTimeout(saveTimer);editing=null;await del("meters",m.id);S.meters.delete(m.id);go("job-"+m.orderId)}
+    else if(act==="del-meter"){if(editing.isNew){const oid=editing.draft.orderId;S.newMeters.delete(editing.id);clearTimeout(saveTimer);editing=null;go("job-"+oid);return}
+      if(!confirmClick(a,"Click again to delete"))return;const m=editing.draft;clearTimeout(saveTimer);editing=null;await del("meters",m.id);S.meters.delete(m.id);go("job-"+m.orderId)}
     else if(act==="del-job"){if(!confirmClick(a,"Click again: deletes all its meters"))return;for(const m of metersOf(id)){await del("meters",m.id);S.meters.delete(m.id)}await del("orders",id);S.orders.delete(id);go("jobs")}
     else if(act==="rm-photo"){if(!confirmClick(a,"Delete?"))return;const i=+a.dataset.i;const ph=editing.draft.photos.splice(i,1)[0];if(ph&&ph.itemId)editing.removed.add(ph.itemId);scheduleSave();showPhotos();if(ph&&ph.itemId){Store.removeFile(ph.itemId).catch(()=>{})}}
-    else if(act==="phone-qr"){const box=$("#qrbox");box.hidden=!box.hidden;if(!box.hidden){const el=$("#qr");el.innerHTML="";const url=location.origin+location.pathname+"#meter-"+editing.id;
+    else if(act==="phone-qr"){if(editing.isNew){editing.dirty=true;editing.touched=true;await flushSave();if(editing.isNew)return}const box=$("#qrbox");box.hidden=!box.hidden;if(!box.hidden){const el=$("#qr");el.innerHTML="";const url=location.origin+location.pathname+"#meter-"+editing.id;
       if(window.QRCode)new QRCode(el,{text:url,width:150,height:150,correctLevel:QRCode.CorrectLevel.M});else el.textContent=url}}
     else if(act==="photo-folder"){try{const url=await Store.folderUrl("photos/WO"+(safeName(editing.draft.wo)||"no-number"));window.open(url,"_blank","noopener")}catch(err){toast(err.status===404?"No photos have been saved for this work order yet.":"Couldn't open the folder: "+err.message)}}
     else if(act==="pdf-one"){const m=S.meters.get(id);const blob=await pdfFor([m]);if(blob)offer(`WO${safeName(m.wo)}_${safeName(m.serial)||"meter"}.pdf`,blob)}
@@ -955,6 +964,7 @@ document.addEventListener("input",e=>{
   if(t.id==="jsearch"){jobSearch=t.value;render();return}
   if(t.dataset.cr&&S.carrierEdit){const [i,k]=t.dataset.cr.split("|");if(S.carrierEdit[+i])S.carrierEdit[+i][k]=t.value;return}
   if(emailDraft&&/^em-(to|cc|subj|body)$/.test(t.id)){emailDraft[{"em-to":"to","em-cc":"cc","em-subj":"subject","em-body":"body"}[t.id]]=t.value;if(t.id==="em-subj"||t.id==="em-body")emailDraft.edited=true;return}
+  if(t.dataset.f==="wo"&&editing)editing.woAuto=false;
   if(t.dataset.f&&editing&&!("rerender" in t.dataset)&&t.tagName!=="SELECT"){setPath(editing.draft,t.dataset.f,t.type==="checkbox"?t.checked:t.value);updateLive();scheduleSave()}
 });
 document.addEventListener("change",async e=>{
@@ -1003,7 +1013,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.6.1";
+const APP_VERSION="1.7.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1140,7 +1150,7 @@ function mergeRemotePhotos(ed){
   return added;
 }
 setInterval(async()=>{
-  const r=route();if(r.v!=="meter"||!editing||editing.id!==r.id||document.hidden||mode!=="ready")return;
+  const r=route();if(r.v!=="meter"||!editing||editing.isNew||editing.id!==r.id||document.hidden||mode!=="ready")return;
   try{const fresh=await Store.get("meters",r.id);if(!editing||editing.id!==fresh.id)return;S.meters.set(fresh.id,fresh);if(mergeRemotePhotos(editing)){showPhotos();toast("New photo added")}}catch(e){}
 },8000);
 async function refresh(){
