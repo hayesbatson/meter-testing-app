@@ -361,7 +361,7 @@ function jobFields(o,pre,data){
 function newJobForm(){
   const el=$("#newjob");el.hidden=false;
   el.innerHTML=`<div class="panel"><div class="bd stack"><h2>New job</h2>
-    <div class="grid g3">${jobFields({received:today(),showPassFail:true},"nj",false)}</div>${datalists()}
+    <div class="grid g3">${jobFields({received:today(),showPassFail:true},"nj",false)}</div>${datalists()}<div id="nj-hint"></div>
     <div class="row"><button class="btn primary" data-act="create-job" data-meter="1">Create job and add first meter</button><button class="btn" data-act="create-job">Create job only</button><button class="btn" data-act="cancel-job">Cancel</button></div></div></div>`;
   $("#nj-client").focus();
 }
@@ -392,7 +392,7 @@ function viewJob(id){
 function notFound(what){return `<div class="empty">That ${what} isn't here any more. <a href="#jobs">Back to jobs</a></div>`}
 function datalists(){
   const L=S.lists;const dl=(id,a)=>`<datalist id="dl-${id}">${(a||[]).map(v=>`<option value="${esc(v)}">`).join("")}</datalist>`;
-  return dl("clients",[...new Set([...QBO.list.map(c=>c.name),...(L.clients||[]),...HIST.customers])])+dl("techs",L.techs)+dl("sizes",L.sizes)+dl("mfr",L.manufacturers)+dl("models",L.models)+dl("regs",L.registrations)+dl("locs",L.locations);
+  return dl("clients",QBO.state==="ready"&&QBO.list.length?QBO.list.map(c=>c.name):[...new Set([...(L.clients||[]),...HIST.customers])])+dl("techs",L.techs)+dl("sizes",L.sizes)+dl("mfr",L.manufacturers)+dl("models",L.models)+dl("regs",L.registrations)+dl("locs",L.locations);
 }
 
 /* ----- meter entry ----- */
@@ -845,6 +845,10 @@ document.addEventListener("click",async e=>{
     if(act==="qbo-fill"){const o=S.orders.get(route().id);if(!o)return;const n={...o};if(!fillFromQbo(n,true)){toast(`No QuickBooks customer or saved address for “${o.client}”. Pick the client from the drop-down list.`);return}
       S.orders.set(o.id,n);try{await put("orders",o.id,n);toast("Filled from QuickBooks")}catch(err){toast("Couldn't save: "+err.message)}render();return}
     if(act==="copy-ship"){const o=S.orders.get(route().id);if(!o)return;if(!String(o.shipTo||"").trim()){toast("Enter a ship-to address first.");return}toast(await copyText(shipLabel(o))?"Ship-to address copied":"Couldn't copy. Select the address and copy it by hand.");return}
+    if(act==="pick-client"){const name=a.dataset.name;const nj=$("#nj-client");
+      if(nj&&!$("#newjob").hidden){nj.value=name;$("#nj-hint").innerHTML="";return}
+      const o=S.orders.get(route().id);if(!o)return;const n={...o,client:name};fillFromQbo(n,false);S.orders.set(o.id,n);
+      try{await put("orders",o.id,n);toast("Linked to QuickBooks customer "+name)}catch(err){toast("Couldn't save: "+err.message)}render();return}
     if(act==="copy-field"){const el=$("#sa-"+a.dataset.k);const v=el?el.value.trim():"";if(!v){toast(a.dataset.l+" is empty");return}toast(await copyText(v)?`Copied ${a.dataset.l}: ${v}`:"Couldn't copy. Select the text and copy it by hand.");return}
     if(act==="addr-save"){const o=S.orders.get(route().id);if(!o||!o.client){toast("Enter the client first.");return}const ad=shipAddr(o);delete ad.check;
       ADDRBOOK.map[o.client.trim().toLowerCase()]=ad;try{await saveAddrBook();toast(`Saved. New jobs for ${o.client} will use this address.`)}catch(err){toast("Couldn't save: "+err.message)}
@@ -870,8 +874,11 @@ document.addEventListener("click",async e=>{
     if(act==="new-job")newJobForm();
     else if(act==="cancel-job"){$("#newjob").hidden=true}
     else if(act==="create-job"){
-      const client=$("#nj-client").value.trim();
+      let client=$("#nj-client").value.trim();
       if(!client){toast("Enter the client.");return}
+      if(QBO.state==="ready"&&!qboFor(client)){const m=qboMatches(client);
+        if(autoMatch(client,m)){client=m[0].name;toast("Using the QuickBooks name: "+client)}
+        else if(m.length&&!a.dataset.anyway){$("#nj-hint").innerHTML=clientHint(client)+`<div class="row"><button class="btn small" data-act="create-job" ${a.dataset.meter?'data-meter="1"':""} data-anyway="1">Create with “${esc(client)}” anyway</button></div>`;toast("Check the client name first.");return}}
       const st=$("#nj-status").value;
       const o={id:uid("o"),client,status:st,statusLog:[{status:st,at:Date.now(),by:userName()}],estimate:$("#nj-est").value.trim(),po:$("#nj-po").value.trim(),approval:$("#nj-appr").value,received:$("#nj-rec").value,showPassFail:$("#nj-pf").value==="1",createdAt:Date.now()};
       fillFromQbo(o,false);
@@ -935,7 +942,8 @@ document.addEventListener("change",async e=>{
   if(t.dataset.f&&editing&&("rerender" in t.dataset)){setPath(editing.draft,t.dataset.f,t.type==="checkbox"?t.checked:t.value);normalize(editing.draft);scheduleSave();render();return}
   if(t.dataset.of){const o=S.orders.get(route().id);if(!o)return;const n={...o,[t.dataset.of]:t.dataset.of==="showPassFail"?t.value==="1":t.value};
     if(t.dataset.of==="status")n.statusLog=[...(o.statusLog||[]),{status:t.value,at:Date.now(),by:userName()}];
-    if(t.dataset.of==="client"&&fillFromQbo(n,false))toast("Filled contact and ship-to from QuickBooks");S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+(err.message||err.code))}render();return}
+    if(t.dataset.of==="client"){const m=qboFor(n.client)?[]:qboMatches(n.client);if(autoMatch(n.client,m)){n.client=m[0].name;toast("Using the QuickBooks name: "+n.client)}
+      if(fillFromQbo(n,false))toast((autoMatch(t.value,m)?"Using the QuickBooks name: "+n.client+". ":"")+"Filled contact and ship-to from QuickBooks")}S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+(err.message||err.code))}render();return}
   if(t.dataset.sel){t.checked?S.sel.add(t.dataset.sel):S.sel.delete(t.dataset.sel);render();return}
   if(t.dataset.selall){const ms=metersOf(t.dataset.selall);ms.forEach(m=>t.checked?S.sel.add(m.id):S.sel.delete(m.id));render();return}
   if(t.id==="rtech"){reviewTech=t.value;render();return}
@@ -948,6 +956,7 @@ document.addEventListener("change",async e=>{
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
   if(t.id==="jfilter"){jobFilter=t.value;render();return}
+  if(t.id==="nj-client"){const h=$("#nj-hint");if(h)h.innerHTML=clientHint(t.value);return}
   if(t.dataset.ship){const o=S.orders.get(route().id);if(!o)return;const ad=shipAddr(o);ad[t.dataset.ship]=t.dataset.ship==="state"?t.value.trim().toUpperCase():t.value.trim();
     const n={...o,ship:ad};S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+err.message)}return}
   if(t.dataset.emsel&&emailDraft){t.checked?emailDraft.sel.add(t.dataset.emsel):emailDraft.sel.delete(t.dataset.emsel);refillEmail(false);render();return}
@@ -972,7 +981,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.4.3";
+const APP_VERSION="1.5.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1339,6 +1348,24 @@ async function importQbo(file){
   setQbo(j);return list.length;
 }
 const qboFor=name=>QBO.map.get(String(name||"").trim().toLowerCase());
+const normName=x=>String(x||"").toLowerCase().replace(/\([^)]*\)/g," ").replace(/&/g," and ").replace(/[.,'’]/g,"").replace(/\b(inc|llc|co|corp|corporation|company|ltd)\b/g," ").replace(/\s+/g," ").trim();
+function qboMatches(name){
+  if(QBO.state!=="ready"||!String(name||"").trim())return [];const exact=qboFor(name);if(exact)return [exact];
+  const k=normName(name);if(!k)return [];
+  const tag=x=>((String(x||"").match(/\(([^)]*)\)\s*$/)||[])[1]||"").trim().toLowerCase();const t=tag(name);
+  const sameTag=c=>!t||!tag(c.name)||tag(c.name)===t;
+  let m=QBO.list.filter(c=>normName(c.name)===k&&sameTag(c));
+  if(!m.length&&k.length>=5)m=QBO.list.filter(c=>{const n=normName(c.name);return sameTag(c)&&(n.startsWith(k)||(n.length>=8&&k.startsWith(n)))});
+  return m.slice(0,6);
+}
+const autoMatch=(name,m)=>m.length===1&&normName(m[0].name)===normName(name);
+function clientHint(name){
+  if(QBO.state!=="ready"||!String(name||"").trim()||qboFor(name))return "";
+  const m=qboMatches(name);
+  if(autoMatch(name,m))return `<div class="note">Not a QuickBooks name. The job will use <b>${esc(m[0].name)}</b>, the matching QuickBooks customer.</div>`;
+  if(m.length)return `<div class="callout warn">Not a QuickBooks name. If it's one of these QuickBooks customers, click it: ${m.map(c=>`<button type="button" class="btn small" data-act="pick-client" data-name="${esc(c.name)}">${esc(c.name)}</button>`).join(" ")}</div>`;
+  return `<div class="note">Not in QuickBooks. You can still create the job, but no contact or address will fill in. Add the customer in QuickBooks and import the list again to link it.</div>`;
+}
 const phoneMain=p=>{const m=String(p||"").match(/Phone:\s*([^A-Za-z]+?)(?=\s+[A-Za-z]+:|$)/);return (m?m[1]:String(p||"")).trim()};
 function fillFromQbo(n,overwrite){
   const c=qboFor(n.client);const saved=ADDRBOOK.map[String(n.client||"").trim().toLowerCase()];
@@ -1413,7 +1440,7 @@ function contactPanel(o){
       <div class="grid g3">${ADDR_FIELDS.map(([k,l])=>`<div class="cf"><label class="f">${l}<input id="sa-${k}" data-ship="${k}" value="${esc(a[k]||"")}" ${k==="state"||k==="zip"?'class="mono"':""}></label><button type="button" class="btn small cbtn" data-act="copy-field" data-k="${k}" data-l="${l}" aria-label="Copy ${l}">Copy</button></div>`).join("")}</div>
       <div class="row"><button class="btn small" data-act="copy-ship">Copy whole address</button><button class="btn small" data-act="addr-save">Save as this client's address</button>
         ${cs.filter(c=>c.shipUrl).map(c=>`<a class="btn small" href="${esc(c.shipUrl)}" target="_blank" rel="noopener">Open ${esc(c.name)}</a>`).join("")}</div>
-      ${!match&&!saved&&QBO.state==="ready"&&o.client?`<div class="note">No QuickBooks customer is named exactly “${esc(o.client)}”. Pick the client from the drop-down list to link it.</div>`:""}
+      ${!match&&QBO.state==="ready"&&o.client?clientHint(o.client):""}
       <h3 class="sec">Shipments</h3>
       ${ships?`<div class="tablewrap"><table class="list"><tbody>${ships}</tbody></table></div>`:'<div class="note">Not shipped yet.</div>'}
       <div class="row" style="align-items:flex-end">
