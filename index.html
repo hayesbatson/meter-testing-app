@@ -1003,7 +1003,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.6.0";
+const APP_VERSION="1.6.1";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1312,8 +1312,8 @@ function histHits(q){
     </tbody></table></div></div>`;
 }
 /* ---------- job status ---------- */
-const JOB_STATUSES=["Not received","Needs evaluation","Waiting for approval","Needs followup","Ready for service","Service in progress","Service complete","Approved by manager","Ready to ship","Complete"];
-const JS_TONE={"Not received":"none","Needs evaluation":"warn","Waiting for approval":"warn","Needs followup":"warn","Ready for service":"info","Service in progress":"info","Service complete":"ok","Approved by manager":"approved","Ready to ship":"ok","Complete":"done"};
+const JOB_STATUSES=["Not received","Needs evaluation","Products on order","Waiting for approval","Needs followup","Ready for service","Service in progress","Service complete","Approved by manager","Ready to ship","Complete"];
+const JS_TONE={"Not received":"none","Needs evaluation":"warn","Products on order":"warn","Waiting for approval":"warn","Needs followup":"warn","Ready for service":"info","Service in progress":"info","Service complete":"ok","Approved by manager":"approved","Ready to ship":"ok","Complete":"done"};
 const jobStatus=o=>JOB_STATUSES.includes(o&&o.status)?o.status:"Not received";
 const jsChip=o=>{const s=jobStatus(o);return `<span class="jstat ${JS_TONE[s]}">${esc(s)}</span>`};
 let jobSort={key:"status",dir:1},jobFilter="open";
