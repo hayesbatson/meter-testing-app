@@ -281,6 +281,7 @@ function go(h){if(location.hash==="#"+h)render();else location.hash=h}
 
 /* ---------- render ---------- */
 function render(){
+  renderPending=false;
   const ae=document.activeElement,fid=ae&&ae.id,selS=ae&&ae.selectionStart,selE=ae&&ae.selectionEnd;
   const r=route();
   const reviewN=[...S.meters.values()].filter(m=>m.status==="ready"||m.status==="question").length;
@@ -303,7 +304,13 @@ function render(){
   tick();
   if(fid){const el=document.getElementById(fid);if(el&&el!==document.activeElement){el.focus();try{if(selS!=null)el.setSelectionRange(selS,selE)}catch(e){}}}
 }
-function softRender(){const r=route();if(r.v==="meter"&&editing&&editing.id===r.id)return;render()}
+let renderPending=false;
+function userBusy(){
+  const nj=document.getElementById("newjob");if(nj&&!nj.hidden&&nj.querySelector("input"))return true;
+  const ae=document.activeElement;return !!(ae&&ae.closest&&ae.closest("#app")&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)&&ae.type!=="checkbox"&&ae.type!=="file");
+}
+function softRender(){const r=route();if(r.v==="meter"&&editing&&editing.id===r.id)return;if(userBusy()){renderPending=true;return}render()}
+document.addEventListener("focusout",()=>setTimeout(()=>{if(renderPending&&!userBusy()){renderPending=false;softRender()}},800));
 function metersOf(oid){return [...S.meters.values()].filter(m=>m.orderId===oid).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))}
 function nextWo(){let mx=Math.max(num(S.settings.woFloor)||0,HIST.woMax||0);S.meters.forEach(m=>{const n=num(m.wo);if(n!==null&&n>mx&&n<1e9)mx=n});return mx?String(mx+1):""}
 function accList(m){const r=meterResult(m);return r.final.map(t=>t.pct===null?'<span class="muted">—</span>':`<span style="color:${t.pass===false?"var(--fail)":"inherit"}">${f2(t.pct)}</span>`).join(" · ")}
@@ -965,7 +972,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.4.2";
+const APP_VERSION="1.4.3";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
