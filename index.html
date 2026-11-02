@@ -285,9 +285,9 @@ const rangeTxt=lim=>lim?`${lim[0].toFixed(1)}–${lim[1].toFixed(1)}%`:"no limit
 /* ---------- routing ---------- */
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
-  for(const p of ["job","meter","report","hist","email"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
+  for(const p of ["job","meter","report","hist","email","cust"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
   if(h.startsWith("order-"))return{v:"job",id:h.slice(6)};
-  if(h==="review"||h==="setup"||h==="perf")return{v:h};
+  if(h==="review"||h==="setup"||h==="perf"||h==="customers"||h==="addrimport")return{v:h};
   return{v:"jobs"};
 }
 function go(h){if(location.hash==="#"+h)render();else location.hash=h}
@@ -298,8 +298,8 @@ function render(){
   const ae=document.activeElement,fid=ae&&ae.id,selS=ae&&ae.selectionStart,selE=ae&&ae.selectionEnd;
   const r=route();
   const reviewN=[...S.meters.values()].filter(m=>m.status==="ready"||m.status==="question").length;
-  $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["perf","Performance"],["setup","Limits &amp; lists"]]
-    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email"].includes(r.v)))?"on":""}">${t}</a>`).join("");
+  $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["customers","Customers"],["perf","Performance"],["setup","Limits &amp; lists"]]
+    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v)))?"on":""}">${t}</a>`).join("");
   $("#mode").innerHTML=account&&mode!=="signin"?`${esc(account.name||account.username||"")} · <a href="#" data-act="signout">Sign out</a>`:"";
   $("#nav").hidden=mode!=="ready";
   const app=$("#app");
@@ -314,6 +314,9 @@ function render(){
   else if(r.v==="review")app.innerHTML=viewReview();
   else if(r.v==="setup")app.innerHTML=viewSetup();
   else if(r.v==="perf")app.innerHTML=viewPerf();
+  else if(r.v==="customers")app.innerHTML=viewCustomers();
+  else if(r.v==="cust")app.innerHTML=viewCustomer(r.id);
+  else if(r.v==="addrimport")app.innerHTML=viewAddrImport();
   tick();
   if(fid){const el=document.getElementById(fid);if(el&&el!==document.activeElement){el.focus();try{if(selS!=null)el.setSelectionRange(selS,selE)}catch(e){}}}
 }
@@ -865,9 +868,35 @@ document.addEventListener("click",async e=>{
       if(!window.jspdf){toast("PDF tool didn't load. Reload and try again.");return}
       const doc=new window.jspdf.jsPDF({unit:"pt",format:"letter"});drawReport(doc,histToMeter(h),{client:h.customer,showPassFail:false});offer(`WO${safeName(h.wo)}_${safeName(h.serial)||"meter"}.pdf`,doc.output("blob"));return}
     if(act==="sort"){const k=a.dataset.k;jobSort=jobSort.key===k?{key:k,dir:-jobSort.dir}:{key:k,dir:k==="received"?-1:1};render();return}
-    if(act==="qbo-fill"){const o=S.orders.get(route().id);if(!o)return;const n={...o};if(!fillFromQbo(n,true)){toast(`No QuickBooks customer or saved address for “${o.client}”. Pick the client from the drop-down list.`);return}
-      S.orders.set(o.id,n);try{await put("orders",o.id,n);toast("Filled from QuickBooks")}catch(err){toast("Couldn't save: "+err.message)}render();return}
-    if(act==="copy-ship"){const o=S.orders.get(route().id);if(!o)return;if(!String(o.shipTo||"").trim()){toast("Enter a ship-to address first.");return}toast(await copyText(shipLabel(o))?"Ship-to address copied":"Couldn't copy. Select the address and copy it by hand.");return}
+    if(act==="qbo-fill"){const o=S.orders.get(route().id);if(!o)return;const n={...o};if(!fillFromQbo(n,true)){toast(`No QuickBooks customer or address for “${o.client}”. Pick the client from the drop-down list.`);return}
+      S.orders.set(o.id,n);try{await put("orders",o.id,n);toast(n.shipAddrId?"Filled from the address book":"Filled from QuickBooks")}catch(err){toast("Couldn't save: "+err.message)}render();return}
+    if(act==="track-copy"){copyText(a.dataset.t).then(ok=>{if(ok)toast("Tracking number copied. Paste it on the carrier's page.")});return}
+    if(act==="addr-setup"){a.disabled=true;a.textContent="Setting up…";
+      try{const n=await setupAddresses();toast(`Address book ready: ${ADDR.list.length.toLocaleString()} addresses`)}catch(err){toast("Couldn't set up the address book: "+err.message);ADDR.state=Store.hasList("addresses")?"ready":"missing"}render();return}
+    if(act==="exp-ups"||act==="exp-fedex"){exportCarrier(act==="exp-ups"?"UPS":"FedEx");return}
+    if(act==="cust-new"){addrEdit={id:"new",customer:"",isNewCust:true,data:{country:"US",isDefault:true}};go("cust-"+encodeURIComponent("+new"));return}
+    if(act==="ab-new"){const c=a.dataset.c;addrEdit={id:"new",customer:c,data:{country:"US",company:c,isDefault:!addrsFor(c).length}};render();const f=$("#ab-label");if(f)f.focus();return}
+    if(act==="ab-edit"){const x=ADDR.list.find(y=>y.id===id);if(!x)return;addrEdit={id,customer:x.customer,data:clone(x)};render();window.scrollTo(0,0);return}
+    if(act==="ab-cancel"){const c=addrEdit&&addrEdit.customer;addrEdit=null;if(!c)go("customers");else render();return}
+    if(act==="ab-del"){if(a.dataset.sure!=="1"){a.dataset.sure="1";a.textContent="Click again to delete";setTimeout(()=>{if(a.isConnected){a.dataset.sure="";a.textContent="Delete"}},4000);return}
+      const x=ADDR.list.find(y=>y.id===id);try{await addrDelete(id);if(x&&x.isDefault){const nx=addrsFor(x.customer)[0];if(nx)await addrSave({...nx,isDefault:true})}toast("Address deleted")}catch(err){toast("Couldn't delete: "+err.message)}render();return}
+    if(act==="ab-default"){const x=ADDR.list.find(y=>y.id===id);if(!x)return;try{await setDefaultAddr(x);toast("Default address changed")}catch(err){toast("Couldn't save: "+err.message)}render();return}
+    if(act==="ab-save"){const e_=addrEdit;if(!e_)return;
+      const cust=e_.isNewCust?String(($("#ab-customer")||{}).value||"").trim():e_.customer;if(!cust){toast("Enter the customer name.");return}
+      const d={...e_.data,customer:cust};if(!String(d.street1||"").trim()||!String(d.city||"").trim()){toast("Enter at least the street and city.");return}
+      d.state=String(d.state||"").trim().toUpperCase();d.phone=formatPhone(d.phone);if(!d.company)d.company=cust;if(!d.source)d.source="Manual";
+      if(!addrsFor(cust).some(x=>x.id!==e_.id))d.isDefault=true;
+      a.disabled=true;
+      try{if(d.isDefault){for(const x of addrsFor(cust))if(x.id!==e_.id&&x.isDefault)await addrSave({...x,isDefault:false})}
+        if(e_.id==="new")await addrCreateMany([d]);else await addrSave({...d,id:e_.id});
+        addrEdit=null;toast("Address saved");go("cust-"+encodeURIComponent(cust))}catch(err){a.disabled=false;toast("Couldn't save: "+err.message)}return}
+    if(act==="aimp-cancel"){AIMP=null;go("customers");return}
+    if(act==="aimp-go"){try{await runImport(a)}catch(err){a.disabled=false;a.textContent="Try again";toast("Import stopped: "+err.message)}return}
+    if(act==="ab-update-from-job"||act==="ab-new-from-job"){const o=S.orders.get(route().id);if(!o||!o.client)return;
+      try{if(act==="ab-update-from-job"){const cur=ADDR.list.find(x=>x.id===o.shipAddrId);if(!cur)return;await addrSave(shipToAddr(o,cur));toast("Address book updated")}
+        else{const d=shipToAddr(o,{label:"",source:"Manual",isDefault:!addrsFor(o.client).length});await addrCreateMany([d]);const n={...o,shipAddrId:d.id};S.orders.set(o.id,n);await put("orders",o.id,n);toast(`Saved as a new address for ${o.client}. You can name it under Customers.`)}}
+      catch(err){toast("Couldn't save: "+err.message)}render();return}
+    if(act==="copy-ship"){const o=S.orders.get(route().id);if(!o)return;{const sa=shipAddr(o);if(!String(sa.street1||sa.city||"").trim()){toast("Enter a ship-to address first.");return}}toast(await copyText(shipLabel(o))?"Ship-to address copied":"Couldn't copy. Select the address and copy it by hand.");return}
     if(act==="pick-client"){const name=a.dataset.name;const nj=$("#nj-client");
       if(nj&&!$("#newjob").hidden){nj.value=name;$("#nj-hint").innerHTML="";return}
       const o=S.orders.get(route().id);if(!o)return;const n={...o,client:name};fillFromQbo(n,false);S.orders.set(o.id,n);
@@ -962,6 +991,9 @@ document.addEventListener("click",async e=>{
 document.addEventListener("input",e=>{
   const t=e.target;
   if(t.id==="jsearch"){jobSearch=t.value;render();return}
+  if(t.id==="csearch"){custSearch=t.value;render();return}
+  if(t.dataset.aimpC!==undefined&&AIMP){const r=AIMP.rows[+t.dataset.aimpC];if(r)r.customer=t.value;return}
+  if(t.dataset.ab&&addrEdit&&t.type!=="checkbox"){addrEdit.data[t.dataset.ab]=t.value;return}
   if(t.dataset.cr&&S.carrierEdit){const [i,k]=t.dataset.cr.split("|");if(S.carrierEdit[+i])S.carrierEdit[+i][k]=t.value;return}
   if(emailDraft&&/^em-(to|cc|subj|body)$/.test(t.id)){emailDraft[{"em-to":"to","em-cc":"cc","em-subj":"subject","em-body":"body"}[t.id]]=t.value;if(t.id==="em-subj"||t.id==="em-body")emailDraft.edited=true;return}
   if(t.dataset.f==="wo"&&editing)editing.woAuto=false;
@@ -979,6 +1011,13 @@ document.addEventListener("change",async e=>{
   if(t.dataset.sel){t.checked?S.sel.add(t.dataset.sel):S.sel.delete(t.dataset.sel);render();return}
   if(t.dataset.selall){const ms=metersOf(t.dataset.selall);ms.forEach(m=>t.checked?S.sel.add(m.id):S.sel.delete(m.id));render();return}
   if(t.id==="rtech"){reviewTech=t.value;render();return}
+  if(t.dataset.ab&&addrEdit&&t.type==="checkbox"){addrEdit.data[t.dataset.ab]=t.checked;return}
+  if(t.dataset.aimpOn!==undefined&&AIMP){const r=AIMP.rows[+t.dataset.aimpOn];if(r)r.action=t.checked?"import":"skip";const b=$("#aimp-go");if(b){const n=AIMP.rows.filter(x=>x.action==="import").length;b.textContent=`Import ${n} address${n===1?"":"es"}`}return}
+  if(t.dataset.aimpC!==undefined&&AIMP){const i=+t.dataset.aimpC,r=AIMP.rows[i];if(!r)return;r.customer=t.value.trim();r.why=r.customer?(qboFor(r.customer)?"Chosen":"New customer"):"No match";
+    if(r.customer&&r.action==="skip"&&!/Our own|Already/.test(r.why)){r.action="import";const cb=$("#aimp-on-"+i);if(cb)cb.checked=true}render();return}
+  if(t.id==="carrier-file"){const f=t.files[0];t.value="";if(!f)return;try{startImport(await f.text());go("addrimport")}catch(err){toast(err.message)}return}
+  if(t.id==="o-addrsel"){const o=S.orders.get(route().id);if(!o)return;const x=ADDR.list.find(y=>y.id===t.value);if(!x)return;const n={...o,ship:addrToShip(x,o),shipAddrId:x.id};
+    S.orders.set(o.id,n);try{await put("orders",o.id,n);toast("Ship-to filled from the address book")}catch(err){toast("Couldn't save: "+err.message)}render();return}
   if(t.id==="t-who"){timeWho=t.value;try{localStorage.setItem("mam-who",t.value)}catch(err){}render();return}
   if(t.id==="pf-from"||t.id==="pf-to"){if(t.id==="pf-from")perfFrom=t.value;else perfTo=t.value;if(perfFrom&&perfTo)render();return}
   if((t.id==="f-photo"||t.id==="f-camera")&&editing){const files=[...t.files];t.value="";await addPhotoBlobs(files.map(f=>({blob:f,name:f.name,raw:true})));return}
@@ -990,7 +1029,7 @@ document.addEventListener("change",async e=>{
     const n={...m,disposition:want===((o&&o.disposition)||"return")?"":want};S.meters.set(m.id,n);try{await put("meters",m.id,n)}catch(err){toast("Couldn't save: "+err.message)}render();return}
   if(t.id==="nj-client"){const h=$("#nj-hint");if(h)h.innerHTML=clientHint(t.value);return}
   if(t.dataset.ship){const o=S.orders.get(route().id);if(!o)return;if(t.dataset.ship==="phone")t.value=formatPhone(t.value);const ad=shipAddr(o);ad[t.dataset.ship]=t.dataset.ship==="state"?t.value.trim().toUpperCase():t.value.trim();
-    const n={...o,ship:ad};S.orders.set(o.id,n);try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+err.message)}return}
+    const n={...o,ship:ad};S.orders.set(o.id,n);const sp=$("#shippick"),ph=shipPicker(n);if(sp&&sp.innerHTML!==ph&&sp._h!==ph){sp.innerHTML=ph;sp._h=ph}try{await put("orders",o.id,n)}catch(err){toast("Couldn't save: "+err.message)}return}
   if(t.dataset.emsel&&emailDraft){t.checked?emailDraft.sel.add(t.dataset.emsel):emailDraft.sel.delete(t.dataset.emsel);refillEmail(false);render();return}
   if(t.id==="em-xlsx"&&emailDraft){emailDraft.xlsx=t.checked;return}
   if(t.id==="qbo-file"){const f=t.files[0];t.value="";if(!f)return;const pr=$("#qbo-progress");if(pr)pr.textContent="Importing…";
@@ -1013,7 +1052,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.7.0";
+const APP_VERSION="1.8.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1041,12 +1080,14 @@ async function gfetch(path,opt={}){
   }
   throw new Error("Microsoft is busy right now. Try again in a minute.");
 }
-const LISTCOLS={orders:["Estimate","PO","Received"],meters:["JobId","Serial","Status","TestDate","Tech"],config:[]};
+const LISTCOLS={orders:["Estimate","PO","Received"],meters:["JobId","Serial","Status","TestDate","Tech"],config:[],addresses:["Customer","City","State","Zip","Source"]};
+const OPT_LISTS={addresses:"MTA Addresses"}; // optional lists, created when first needed
 function fieldsFor(coll,o){
   const {id,...rest}=o;const f={Data:JSON.stringify(rest)};
   if(coll==="orders"){f.Title=o.client||"";f.Estimate=o.estimate||"";f.PO=o.po||"";f.Received=o.received||""}
   if(coll==="meters"){f.Title=String(o.wo||"");f.JobId=String(o.orderId||"");f.Serial=o.serial||"";f.Status=o.status||"";f.TestDate=o.testDate||"";f.Tech=o.tech||""}
   if(coll==="config"){f.Title=o.key||""}
+  if(coll==="addresses"){f.Title=o.label||o.company||"";f.Customer=o.customer||"";f.City=o.city||"";f.State=o.state||"";f.Zip=o.zip||"";f.Source=o.source||""}
   return f;
 }
 const encPath=p=>p.split("/").map(encodeURIComponent).join("/");
@@ -1055,8 +1096,30 @@ const GraphStore={
   async connect(){
     const s=await gfetch(`/sites/${CFG.siteHost}:${CFG.sitePath}?$select=id`);siteId=s.id;
     const ls=await gfetch(`/sites/${siteId}/lists?$select=id,displayName&$top=200`);listIds={};
-    (ls.value||[]).forEach(l=>{for(const k in CFG.lists)if(l.displayName===CFG.lists[k])listIds[k]=l.id});
+    const all={...CFG.lists,...OPT_LISTS};(ls.value||[]).forEach(l=>{for(const k in all)if(l.displayName===all[k])listIds[k]=l.id});
     return Object.keys(CFG.lists).every(k=>listIds[k]);
+  },
+  hasList(k){return !!listIds[k]},
+  async ensureList(k){
+    if(listIds[k])return;const name=OPT_LISTS[k];
+    const columns=[...LISTCOLS[k].map(n=>({name:n,text:{}})),{name:"Data",text:{allowMultipleLines:true,textType:"plain"}}];
+    try{const l=await gfetch(`/sites/${siteId}/lists`,{method:"POST",scopes:MANAGE_SCOPES,json:{displayName:name,columns,list:{template:"genericList"}}});listIds[k]=l.id}
+    catch(e){if(e.status===409||/already exists/i.test(e.message)){await this.connect();if(listIds[k])return}throw e}
+  },
+  async createMany(coll,list,progress){ // up to 20 items per request with Graph $batch
+    const ids=new Array(list.length).fill(null);let todo=list.map((o,i)=>i);
+    for(let attempt=0;todo.length&&attempt<6;attempt++){
+      const left=[];
+      for(let s=0;s<todo.length;s+=20){
+        const part=todo.slice(s,s+20);
+        const r=await gfetch("/$batch",{method:"POST",json:{requests:part.map(i=>({id:String(i),method:"POST",url:listItems(coll),headers:{"Content-Type":"application/json"},body:{fields:fieldsFor(coll,list[i])}}))}});
+        let wait=0;(r.responses||[]).forEach(x=>{const i=+x.id;if(x.status>=200&&x.status<300)ids[i]=String(x.body.id);else{left.push(i);if(x.status===429)wait=Math.max(wait,num(x.headers&&x.headers["Retry-After"])||3)}});
+        if(progress)progress(ids.filter(Boolean).length,list.length);if(wait)await sleep(wait*1000);
+      }
+      todo=left;if(left.length)await sleep(1500*(attempt+1));
+    }
+    if(todo.length)throw new Error(`${todo.length} address${todo.length>1?"es":""} couldn't be saved. Try again.`);
+    return ids;
   },
   async setup(){
     const step=async(name,fn)=>{try{return await fn()}catch(e){
@@ -1097,8 +1160,10 @@ const GraphStore={
 };
 /* Test mode (?mock): keeps everything in memory so the screens can be tried without Microsoft. */
 const MockStore={
-  data:{orders:new Map(),meters:new Map(),config:new Map()},files:new Map(),n:1,ready:false,
+  data:{orders:new Map(),meters:new Map(),config:new Map(),addresses:new Map()},files:new Map(),n:1,ready:false,lists:{},
   async connect(){return this.ready},
+  hasList(k){return !!this.lists[k]},async ensureList(k){this.lists[k]=true},
+  async createMany(coll,list,progress){const ids=[];for(const o of list){ids.push(await this.create(coll,o));if(progress)progress(ids.length,list.length)}return ids},
   async setup(){this.ready=true},
   async all(coll){return [...this.data[coll].values()].map(clone)},
   async create(coll,o){const id=String(this.n++);this.data[coll].set(id,{...clone(o),id});return id},
@@ -1155,7 +1220,7 @@ setInterval(async()=>{
 },8000);
 async function refresh(){
   if(document.hidden||mode!=="ready")return;
-  try{await flushSave();await loadAll();softRender()}catch(e){}
+  try{await flushSave();await loadAll();if(ADDR.state==="ready"&&["customers","cust","job"].includes(route().v))await loadAddresses();softRender()}catch(e){}
 }
 
 /* ---------- start ---------- */
@@ -1176,7 +1241,7 @@ async function afterSignIn(){
     const ok=await Store.connect();
     if(!ok){mode="setup";render();return}
     await loadAll();mode="ready";render();
-    loadHistory();loadQbo();
+    loadHistory();loadQbo();loadAddresses().then(softRender);
     clearInterval(refreshTimer);refreshTimer=setInterval(refresh,60000);
   }catch(e){mode="error";loadError=e.status===403||e.status===401?"Your Microsoft account doesn't have access to the Meter Testing App SharePoint site. Ask Hayes to add you as a member. ("+e.message+")":e.message;render()}
 }
@@ -1377,7 +1442,9 @@ async function importQbo(file){
   if(!list.length)throw new Error("No customers found in that file.");
   const j={imported:new Date().toISOString(),importedBy:userName(),source:file.name,customers:list};
   await Store.putFile("customers/qbo-customers.json",new Blob([JSON.stringify(j)],{type:"application/json"}));
-  setQbo(j);return list.length;
+  setQbo(j);
+  if(ADDR.state==="ready"){const n=await seedFromQbo();if(n)toast(`Added QuickBooks addresses for ${n} new customer${n===1?"":"s"}`)} // never changes existing addresses
+  return list.length;
 }
 const qboFor=name=>QBO.map.get(String(name||"").trim().toLowerCase());
 const normName=x=>String(x||"").toLowerCase().replace(/\([^)]*\)/g," ").replace(/&/g," and ").replace(/[.,'’]/g,"").replace(/\b(inc|llc|co|corp|corporation|company|ltd)\b/g," ").replace(/\s+/g," ").trim();
@@ -1400,13 +1467,15 @@ function clientHint(name){
 }
 const phoneMain=p=>{const m=String(p||"").match(/Phone:\s*([^A-Za-z]+?)(?=\s+[A-Za-z]+:|$)/);return (m?m[1]:String(p||"")).trim()};
 function fillFromQbo(n,overwrite){
-  const c=qboFor(n.client);const saved=ADDRBOOK.map[String(n.client||"").trim().toLowerCase()];
-  if(!c&&!saved)return false;
+  const c=qboFor(n.client);const book=ADDR.state==="ready"?defaultAddr(n.client):null;
+  const saved=book?null:ADDRBOOK.map[String(n.client||"").trim().toLowerCase()];
+  if(!c&&!saved&&!book)return false;
   const set=(k,v)=>{if(v&&(overwrite||!String(n[k]||"").trim()))n[k]=v};
   if(c){set("contact",c.contact);set("emails",c.emails.join(", "));set("phone",formatPhone(phoneMain(c.phone)));set("shipTo",c.ship)}
   if(overwrite||!n.ship){
-    if(saved)n.ship={...saved};
-    else{const p=c.shipParts?{...c.shipParts,check:!c.shipParts.city}:parseAddr(c.ship);
+    if(book){n.ship=addrToShip(book,n);n.shipAddrId=book.id;if(!c)n.contact=n.contact||book.attn}
+    else if(saved)n.ship={...saved};
+    else if(c){const p=c.shipParts?{...c.shipParts,check:!c.shipParts.city}:parseAddr(c.ship);
       n.ship={company:n.client,attn:c.contact||"",street1:p.street1||"",street2:p.street2||"",city:p.city||"",state:p.state||"",zip:p.zip||"",phone:formatPhone(phoneMain(c.phone)),email:c.emails[0]||"",check:!!p.check}}
   }
   return true;
@@ -1414,9 +1483,10 @@ function fillFromQbo(n,overwrite){
 /* ---------- shipping ---------- */
 const DEFAULT_CARRIERS=[
   {name:"UPS",shipUrl:"https://www.ups.com/ship",trackUrl:"https://www.ups.com/track?tracknum={tracking}"},
-  {name:"FedEx",shipUrl:"https://www.fedex.com/en-us/shipping.html",trackUrl:"https://www.fedex.com/fedextrack/?trknbr={tracking}"},
-  {name:"SpeeDee",shipUrl:"https://speedeedelivery.com",trackUrl:""}];
-const carriers=()=>Array.isArray(S.settings.carriers)&&S.settings.carriers.length?S.settings.carriers:DEFAULT_CARRIERS;
+  {name:"FedEx",shipUrl:"https://www.fedex.com/shippingplus/en-us/shipment/create",trackUrl:"https://www.fedex.com/fedextrack/?trknbr={tracking}"},
+  {name:"SpeeDee",shipUrl:"https://speedeedelivery.com",trackUrl:"https://speedeedelivery.com/track-a-shipment/"}];
+const OLD_DEFAULT_URL={"https://www.fedex.com/en-us/shipping.html":"https://www.fedex.com/shippingplus/en-us/shipment/create"};
+const carriers=()=>Array.isArray(S.settings.carriers)&&S.settings.carriers.length?S.settings.carriers.map(c=>({...c,shipUrl:OLD_DEFAULT_URL[c.shipUrl]||c.shipUrl,trackUrl:c.trackUrl||(c.name==="SpeeDee"?"https://speedeedelivery.com/track-a-shipment/":"")})):DEFAULT_CARRIERS;
 const carrierNames=()=>[...carriers().map(c=>c.name),"Customer pickup","Other"];
 function trackUrl(s){
   const t=String(s.tracking||"").trim();if(!t)return "";const c=carriers().find(x=>x.name===s.carrier);if(!c||!c.trackUrl)return "";
@@ -1459,18 +1529,19 @@ async function loadAddrBook(){try{const r=await Store.getFile("customers/address
 async function saveAddrBook(){await Store.putFile("customers/address-book.json",new Blob([JSON.stringify({updated:new Date().toISOString(),by:userName(),addresses:ADDRBOOK.map})],{type:"application/json"}))}
 function contactPanel(o){
   const a=shipAddr(o);const cs=carriers();
-  const ships=(o.shipments||[]).map(s=>{const u=trackUrl(s);return `<tr><td>${fmtDate(s.date)}</td><td>${esc(s.carrier)}</td><td class="mono">${u?`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(s.tracking)}</a>`:esc(s.tracking)||'<span class="muted">—</span>'}</td><td class="note">${esc(s.by||"")}</td><td><button class="btn small" data-act="ship-del" data-sid="${esc(s.id)}" aria-label="Delete shipment">✕</button></td></tr>`}).join("");
-  const match=qboFor(o.client);const saved=ADDRBOOK.map[String(o.client||"").trim().toLowerCase()];
-  return `<div class="panel"><div class="hd"><h2>Contact &amp; shipping</h2><button class="btn small" data-act="qbo-fill" ${QBO.state!=="ready"&&!saved?"disabled":""}>Fill from ${saved?"saved address":"QuickBooks"}</button></div>
+  const ships=(o.shipments||[]).map(s=>{const u=trackUrl(s);return `<tr><td>${fmtDate(s.date)}</td><td>${esc(s.carrier)}</td><td class="mono">${u?`<a href="${esc(u)}" target="_blank" rel="noopener" data-act="track-copy" data-t="${esc(s.tracking)}" title="Opens tracking and copies the number">${esc(s.tracking)}</a>`:esc(s.tracking)||'<span class="muted">—</span>'}</td><td class="note">${esc(s.by||"")}</td><td><button class="btn small" data-act="ship-del" data-sid="${esc(s.id)}" aria-label="Delete shipment">✕</button></td></tr>`}).join("");
+  const match=qboFor(o.client);const book=ADDR.state==="ready";const saved=!book&&ADDRBOOK.map[String(o.client||"").trim().toLowerCase()];
+  return `<div class="panel"><div class="hd"><h2>Contact &amp; shipping</h2><button class="btn small" data-act="qbo-fill" ${QBO.state!=="ready"&&!saved&&!book?"disabled":""}>Fill from ${book?"address book":saved?"saved address":"QuickBooks"}</button></div>
     <div class="bd stack">
       <div class="grid g3"><label class="f">Contact<input id="o-contact" data-of="contact" value="${esc(o.contact)}"></label>
         <label class="f">Email(s) for results<input id="o-emails" data-of="emails" value="${esc(o.emails)}" placeholder="Separate with commas"></label>
         <label class="f">Phone<input id="o-phone" data-of="phone" value="${esc(o.phone)}"></label></div>
       <h3 class="sec">Ship to</h3>
       <div class="note">Click <b>Copy</b> next to a field, then paste it into the matching box on the carrier's site.</div>
-      ${a.street1&&!a.city?'<div class="callout warn">Fill in the city. QuickBooks gave this address on one line and the app couldn\'t tell where the street ends. Fix it here, then choose <b>Save as this client\'s address</b> so it\'s right next time.</div>':a.check&&a.city?'<div class="note">Split from a one-line QuickBooks address. Check the street and city before you ship, then choose <b>Save as this client\'s address</b>.</div>':""}
+      ${a.street1&&!a.city?'<div class="callout warn">Fill in the city. QuickBooks gave this address on one line and the app couldn\'t tell where the street ends. Fix it here, then save it to the address book so it\'s right next time.</div>':a.check&&a.city?'<div class="note">Split from a one-line QuickBooks address. Check the street and city before you ship, then choose <b>Save as this client\'s address</b>.</div>':""}
+      <div id="shippick">${shipPicker(o)}</div>
       <div class="grid g3">${ADDR_FIELDS.map(([k,l])=>`<div class="cf"><label class="f">${l}<input id="sa-${k}" data-ship="${k}" value="${esc(a[k]||"")}" ${k==="state"||k==="zip"?'class="mono"':""}></label><button type="button" class="btn small cbtn" data-act="copy-field" data-k="${k}" data-l="${l}" aria-label="Copy ${l}">Copy</button></div>`).join("")}</div>
-      <div class="row"><button class="btn small" data-act="copy-ship">Copy whole address</button><button class="btn small" data-act="addr-save">Save as this client's address</button>
+      <div class="row"><button class="btn small" data-act="copy-ship">Copy whole address</button>${ADDR.state==="ready"?"":`<button class="btn small" data-act="addr-save">Save as this client's address</button>`}
         ${cs.filter(c=>c.shipUrl).map(c=>`<a class="btn small" href="${esc(c.shipUrl)}" target="_blank" rel="noopener">Open ${esc(c.name)}</a>`).join("")}</div>
       ${!match&&QBO.state==="ready"&&o.client?clientHint(o.client):""}
       <h3 class="sec">Shipments</h3>
@@ -1482,6 +1553,216 @@ function contactPanel(o){
         <button class="btn small primary" data-act="ship-add">Mark shipped</button></div>
     </div></div>`;
 }
+/* ---------- address book (SharePoint list "MTA Addresses"): the main source of ship-to addresses ---------- */
+const ADDR={state:"idle",list:[],err:""};
+const SRC_RANK={Manual:4,UPS:3,FedEx:2,QuickBooks:1};
+const AB_FIELDS=[["label","Name for this address (e.g. branch)"],["company","Company"],["attn","Attention"],["street1","Street address"],["street2","Address line 2"],["street3","Address line 3"],["city","City"],["state","State"],["zip","ZIP"],["country","Country"],["phone","Phone"],["ext","Ext."],["email","Email"]];
+const ckey=n=>String(n||"").trim().toLowerCase();
+const addrsFor=name=>ADDR.list.filter(a=>ckey(a.customer)===ckey(name)).sort((a,b)=>(b.isDefault?1:0)-(a.isDefault?1:0)||(SRC_RANK[b.source]||0)-(SRC_RANK[a.source]||0)||String(a.label||"").localeCompare(String(b.label||"")));
+const defaultAddr=name=>addrsFor(name)[0]||null;
+const addrLine=a=>[a.street1,a.street2,[a.city,[a.state,a.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ")].filter(x=>String(x||"").trim()).join(", ");
+const addrTitle=a=>a.label||a.company||a.street1||"Address";
+const addrKey=a=>(String(a.street1||"").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,14))+"|"+String(a.zip||"").slice(0,5);
+function addrToShip(a,o){return {company:a.company||(o&&o.client)||a.customer||"",attn:a.attn||"",street1:a.street1||"",street2:[a.street2,a.street3].filter(Boolean).join(", "),city:a.city||"",state:a.state||"",zip:a.zip||"",phone:formatPhone([a.phone,a.ext?"x"+a.ext:""].filter(Boolean).join(" ")),email:a.email||"",check:false}}
+async function loadAddresses(){
+  if(!Store.hasList("addresses")){ADDR.state="missing";return}
+  try{ADDR.list=await Store.all("addresses");ADDR.state="ready"}catch(e){ADDR.state="error";ADDR.err=e.message}
+}
+async function setupAddresses(){
+  await Store.ensureList("addresses");
+  const fresh=[];
+  for(const [k,v] of Object.entries(ADDRBOOK.map||{})){ // addresses the team saved before the address book existed
+    const name=(QBO.list.find(c=>ckey(c.name)===k)||{}).name||[...S.orders.values()].map(o=>o.client).find(c=>ckey(c)===k)||k;
+    fresh.push({customer:name,label:"",company:v.company||name,attn:v.attn||"",street1:v.street1||"",street2:v.street2||"",city:v.city||"",state:v.state||"",zip:v.zip||"",country:"US",phone:v.phone||"",email:v.email||"",isDefault:true,source:"Manual"});
+  }
+  if(fresh.length)await addrCreateMany(fresh);
+  await loadAddresses();
+  const n=await seedFromQbo();
+  return fresh.length+n;
+}
+async function addrCreateMany(list,progress){
+  list.forEach(a=>{a.createdBy=userName();a.createdAt=Date.now();stamp(a)});
+  const ids=await Store.createMany("addresses",list,progress);
+  list.forEach((a,i)=>{a.id=ids[i]});ADDR.list.push(...list.filter(a=>a.id));return ids;
+}
+async function addrSave(a){const d=stamp({...a});delete d.id;await Store.update("addresses",a.id,d);const i=ADDR.list.findIndex(x=>x.id===a.id);if(i>=0)ADDR.list[i]={...d,id:a.id}}
+async function addrDelete(id){await Store.remove("addresses",id);ADDR.list=ADDR.list.filter(x=>x.id!==id)}
+async function setDefaultAddr(a){
+  for(const x of addrsFor(a.customer)){if(x.id!==a.id&&x.isDefault)await addrSave({...x,isDefault:false})}
+  await addrSave({...a,isDefault:true});
+}
+/* QuickBooks ship-to addresses for customers that have none yet (never overwrites) */
+async function seedFromQbo(progress){
+  if(ADDR.state!=="ready"||QBO.state!=="ready")return 0;
+  const have=new Set(ADDR.list.map(a=>ckey(a.customer)));const add=[];
+  for(const c of QBO.list){
+    if(have.has(ckey(c.name)))continue;
+    const p=c.shipParts||(c.ship?parseAddr(c.ship):null);if(!p||!(p.street1||p.city))continue;
+    add.push({customer:c.name,label:"",company:c.name,attn:c.contact||"",street1:p.street1||"",street2:p.street2||"",city:p.city||"",state:p.state||"",zip:p.zip||"",country:"US",phone:formatPhone(phoneMain(c.phone)),email:c.emails[0]||"",isDefault:true,source:"QuickBooks"});
+  }
+  if(add.length)await addrCreateMany(add,progress);
+  return add.length;
+}
+
+/* ----- importing UPS / FedEx address book files ----- */
+let AIMP=null; // {format,rows:[{inc,customer,action,why}]}
+function parseCsv(text){
+  const rows=[];let row=[],f="",q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
+    else if(c==='"')q=true;else if(c===","){row.push(f);f=""}else if(c==="\n"||c==="\r"){if(c==="\r"&&text[i+1]==="\n")i++;row.push(f);rows.push(row);row=[];f=""}else f+=c}
+  if(f!==""||row.length){row.push(f);rows.push(row)}
+  return rows.filter(r=>r.some(x=>String(x).trim()));
+}
+function readCarrierFile(text){
+  const rows=parseCsv(text.replace(/^﻿/,""));if(rows.length<2)throw new Error("The file has no addresses in it.");
+  const h=rows[0].map(x=>x.trim().toLowerCase());const ix=n=>h.indexOf(n.toLowerCase());const g=(r,n)=>{const i=ix(n);return i>=0?String(r[i]||"").trim():""};
+  let format,map;
+  if(ix("company name")>=0&&ix("street address line 1")>=0){format="UPS";
+    map=r=>({company:g(r,"Company Name"),nick:g(r,"Nick Name"),attn:g(r,"Contact Name").replace(/^[,\s]+/,""),street1:g(r,"Street Address Line 1"),street2:g(r,"Street Address Line 2"),street3:g(r,"Street Address Line 3"),city:g(r,"City"),state:g(r,"St/Prov").toUpperCase(),zip:g(r,"Postal Cd"),country:g(r,"Country")||"US",phone:g(r,"Contact Phone"),ext:g(r,"Contact Tel Ext"),email:g(r,"Contact Email"),residential:g(r,"Res Ind")==="1"})}
+  else if(ix("addressone")>=0&&ix("nickname")>=0){format="FedEx";
+    map=r=>({company:g(r,"Company"),nick:g(r,"Nickname"),attn:g(r,"FullName")||[g(r,"FirstName"),g(r,"LastName")].filter(Boolean).join(" "),street1:g(r,"AddressOne"),street2:g(r,"AddressTwo"),street3:"",city:g(r,"City"),state:g(r,"State").toUpperCase(),zip:g(r,"Zip"),country:g(r,"CountryCode")||"US",phone:g(r,"PhoneNumber"),ext:g(r,"ExtensionNumber"),email:g(r,"EmailAddress"),residential:/^(y|1|true)$/i.test(g(r,"ResidentialFlag"))})}
+  else throw new Error("This doesn't look like a UPS or FedEx address book export.");
+  return {format,items:rows.slice(1).map(map).filter(a=>a.street1||a.company)};
+}
+function allCustomerNames(){return [...new Set([...QBO.list.map(c=>c.name),...ADDR.list.map(a=>a.customer)])]}
+const CUST_ALIASES=[[/^core\s*(&|and)\s*main/i,/^core & main$/i],[/^(rpm consulting|cbre)/i,/^rpm water equity/i]];
+function guessCustomer(inc){
+  const names=allCustomerNames();const exact=n=>names.find(x=>ckey(x)===ckey(n));
+  for(const [re,to] of CUST_ALIASES){const t=names.find(x=>to.test(x));if(t&&(re.test(inc.company)||re.test(inc.nick)))return {customer:t,why:"Exact match"}}
+  for(const n of [inc.nick,inc.company])if(n&&exact(n))return {customer:exact(n),why:"Exact match"};
+  for(const n of [inc.nick,inc.company]){if(!n)continue;const k=normName(n);const m=names.filter(x=>normName(x)===k);if(m.length===1)return {customer:m[0],why:"Same name"}}
+  for(const n of [inc.company,inc.nick]){if(!n)continue;const k=normName(n);if(k.length<5)continue;
+    const m=names.filter(x=>{const y=normName(x);return y.length>=6&&(k.startsWith(y)||y.startsWith(k))});if(m.length===1)return {customer:m[0],why:"Check"}}
+  return {customer:"",why:"No match"};
+}
+function startImport(text){
+  const {format,items}=readCarrierFile(text);
+  AIMP={format,rows:items.map(inc=>{const g=guessCustomer(inc);const own=/1985 county ro?a?d 90/i.test(inc.street1)||/^mid[- ]?america meter/i.test(inc.company);
+    const dup=g.customer&&addrsFor(g.customer).some(a=>a.source!=="QuickBooks"&&addrKey(a)===addrKey(inc));
+    return {inc,customer:g.customer,why:own?"Our own address":dup?"Already in the address book":g.why,action:own||dup||!g.customer?"skip":"import"}})};
+}
+function viewAddrImport(){
+  if(!AIMP)return '<div class="empty">Choose a UPS or FedEx file under <a href="#customers">Customers</a>.</div>';
+  const n=AIMP.rows.filter(r=>r.action==="import").length;
+  return `<div class="stack"><div><div class="crumb"><a href="#customers">Customers</a> › import</div>
+    <div class="row spread"><h1>Import ${esc(AIMP.format)} addresses</h1><div class="row"><button class="btn" data-act="aimp-cancel">Cancel</button><button class="btn primary" data-act="aimp-go" id="aimp-go">Import ${n} address${n===1?"":"es"}</button></div></div></div>
+    <p class="muted" style="margin:0;max-width:80ch">Check the customer for each address. Rows marked <b>Check</b> or <b>No match</b> need a look. Type a customer name to change it; any name not in QuickBooks becomes a new customer. ${esc(AIMP.format)} addresses replace QuickBooks addresses for the same customer${AIMP.format==="FedEx"?", but don't replace UPS addresses":""}.</p>
+    <div class="panel"><div class="tablewrap"><table class="list"><thead><tr><th>Import</th><th>From ${esc(AIMP.format)}</th><th>Address</th><th>Customer in the app</th><th>Match</th></tr></thead><tbody>
+    ${AIMP.rows.map((r,i)=>`<tr><td><input type="checkbox" id="aimp-on-${i}" data-aimp-on="${i}" ${r.action==="import"?"checked":""} style="width:18px;height:18px"></td>
+      <td><b>${esc(r.inc.company||r.inc.nick)}</b>${r.inc.nick&&r.inc.nick!==r.inc.company?`<br><span class="note">${esc(r.inc.nick)}</span>`:""}${r.inc.attn?`<br><span class="note">Attn: ${esc(r.inc.attn)}</span>`:""}</td>
+      <td style="white-space:normal;min-width:200px">${esc(addrLine(r.inc))}</td>
+      <td style="min-width:240px"><input id="aimp-c-${i}" data-aimp-c="${i}" data-ac="custs" autocomplete="off" value="${esc(r.customer)}" placeholder="Type a customer"></td>
+      <td><span class="chip ${r.why==="Exact match"||r.why==="Same name"?"pass":r.why==="Check"?"none":"fail"}" style="text-transform:none">${esc(r.why)}</span></td></tr>`).join("")}
+    </tbody></table></div></div></div>`;
+}
+async function runImport(btn){
+  const rows=AIMP.rows.filter(r=>r.action==="import"&&String(r.customer||"").trim());
+  if(!rows.length){toast("Nothing to import.");return}
+  btn.disabled=true;const say=t=>{btn.textContent=t};
+  const src=AIMP.format;let added=0,removed=0;
+  const byCust=new Map();rows.forEach(r=>{const k=ckey(r.customer);if(!byCust.has(k))byCust.set(k,[]);byCust.get(k).push(r)});
+  for(const [k,rs] of byCust){
+    const cur=addrsFor(rs[0].customer);
+
+    // remove QuickBooks starting addresses: carrier data is preferred
+    for(const a of cur.filter(a=>a.source==="QuickBooks")){await addrDelete(a.id);removed++}
+    const keep=addrsFor(rs[0].customer);
+    const higher=keep.some(a=>(SRC_RANK[a.source]||0)>=SRC_RANK[src]);
+    const add=[];
+    rs.forEach((r,j)=>{if(keep.some(a=>addrKey(a)===addrKey(r.inc))||add.some(a=>addrKey(a)===addrKey(r.inc)))return;
+      const i=r.inc;add.push({customer:r.customer.trim(),label:rs.length>1||keep.length?(i.company&&ckey(i.company)!==ckey(r.customer)?i.company:i.nick||""):"",company:i.company||r.customer,attn:i.attn,street1:i.street1,street2:i.street2,street3:i.street3,city:i.city,state:i.state,zip:i.zip,country:i.country,phone:formatPhone(i.phone),ext:i.ext,email:i.email,residential:i.residential,
+        isDefault:false,source:src})});
+    if(add.length&&(!higher||!keep.some(a=>a.isDefault))){add[0].isDefault=true;for(const x of keep)if(x.isDefault)await addrSave({...x,isDefault:false})}
+    if(add.length){say(`Saving ${added+add.length}…`);await addrCreateMany(add);added+=add.length}
+  }
+  AIMP=null;toast(`Imported ${added} address${added===1?"":"es"}${removed?`, replaced ${removed} QuickBooks address${removed===1?"":"es"}`:""}.`);go("customers");
+}
+
+/* ----- exporting for UPS and FedEx (load these into their address books) ----- */
+const UPS_HEAD=["Company Name","Nick Name","Contact Name","Street Address Line 1","Street Address Line 2","Street Address Line 3","City","St/Prov","Postal Cd","Country","Contact Phone","Contact Tel Ext","Contact Email","Contact Fax","Res Ind","Loc ID","Cons Ind","Account Number","Acc Postal Cd","USPSPO Box IND"];
+const FEDEX_HEAD="Nickname,FullName,FirstName,LastName,Title,Company,Department,AddressOne,AddressTwo,City,State,Zip,PhoneNumber,ExtensionNumber,FAXNumber,PagerNumber,MobilePhoneNumber,CountryCode,EmailAddress,VerifiedFlag,AcceptedFlag,ValidFlag,ResidentialFlag,CustomsIDEIN,ReferenceDescription,ServiceTypeCode,PackageTypeCode,CollectionMethodCode,BillCode,BillAccountNumber,DutyBillCode,DutyBillAccountNumber,CurrencyTypeCode,InsightIDNumber,GroundReferenceDescription,ShipmentNotificationRecipientEmail,RecipientEmailLanguage,RecipientEmailShipmentnotification,RecipientEmailExceptionnotification,RecipientEmailDeliverynotification,PartnerTypeCodes,NetReturnBillAccountNumber,CustomsIDTypeCode,AddressTypeCode,ShipmentNotificationSenderEmail,SenderEmailLanguage,SenderEmailShipmentnotification,SenderEmailExceptionnotification,SenderEmailDeliverynotification,RecipientEmailPickupnotification,SenderEmailPickupnotification,OpCoTypeCd,BrokerAccounttID,BrokerTaxID,DefaultBrokerID,RecipientEmailTenderednotification,SenderEmailTenderednotification,UserAccountNumber,DeliveryInstructions,EstimatedDeliveryFlag,SenderEstimatedDeliveryFlag,ShipmentNotificationSenderDeliveryChannel,ShipmentNotificationSenderMobileNo,ShipmentNotificationSenderMobileNoCountry,ShipmentNotificationSenderMobileNoLanguage".split(",");
+const csvCell=v=>{v=v==null?"":String(v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+const cut=(v,n)=>String(v||"").slice(0,n);
+function exportCarrier(which){
+  const list=ADDR.list.filter(a=>a.street1&&a.city&&a.zip);const used=new Set();
+  const nick=(a,max)=>{let base=cut((a.label?`${a.customer} - ${a.label}`:a.customer)||a.company,max).trim();let n=base,i=2;while(used.has(n.toLowerCase())){const sfx=" "+i++;n=cut(base,max-sfx.length).trim()+sfx}used.add(n.toLowerCase());return n};
+  const digits=p=>String(p||"").replace(/x.*$/i,"").replace(/\D/g,"");
+  let rows;
+  if(which==="UPS")rows=[UPS_HEAD,...list.map(a=>[cut(a.company||a.customer,35),nick(a,35),cut(a.attn,35),cut(a.street1,35),cut(a.street2,35),cut(a.street3,35),cut(a.city,30),a.state,a.zip,a.country||"US",digits(a.phone),a.ext||(String(a.phone).match(/x\s*(\d+)/i)||[])[1]||"",a.email||"","",a.residential?"1":"0","","0","","","0"])];
+  else rows=[FEDEX_HEAD,...list.map(a=>{const r=FEDEX_HEAD.map(()=>"");const set=(k,v)=>{r[FEDEX_HEAD.indexOf(k)]=v};
+    set("Nickname",nick(a,20));set("FullName",cut(a.attn,35));set("Company",cut(a.company||a.customer,35));set("AddressOne",cut(a.street1,35));set("AddressTwo",cut([a.street2,a.street3].filter(Boolean).join(" "),35));
+    set("City",cut(a.city,35));set("State",a.state);set("Zip",a.zip);set("PhoneNumber",digits(a.phone).slice(0,15));set("ExtensionNumber",a.ext||"");set("CountryCode",a.country||"US");set("EmailAddress",a.email||"");set("ResidentialFlag",a.residential?"Y":"N");return r})];
+  downloadFile(`MAM_${which}_address_book_${today()}.csv`,"﻿"+rows.map(r=>r.map(csvCell).join(",")).join("\r\n"));
+  toast(`${list.length} addresses exported for ${which}`+(ADDR.list.length>list.length?` (${ADDR.list.length-list.length} skipped: missing street, city or ZIP)`:""));
+}
+
+/* ----- Customers tab ----- */
+let custSearch="",addrEdit=null; // addrEdit: {id|"new", customer, data}
+function viewCustomers(){
+  if(ADDR.state==="missing")return `<div class="panel" style="max-width:640px;margin:30px auto"><div class="bd stack"><h1>Set up the address book</h1>
+    <p class="muted" style="margin:0">This creates the address book in your SharePoint site. Every customer gets their QuickBooks ship-to address to start, and addresses your team saved in the last few days are kept. After that, import your UPS and FedEx files.</p>
+    <button class="btn primary" data-act="addr-setup" style="align-self:flex-start">Set up the address book</button></div></div>`;
+  if(ADDR.state!=="ready")return `<div class="empty">${ADDR.state==="error"?"Couldn't load the address book: "+esc(ADDR.err):"Loading the address book…"}</div>`;
+  const q=custSearch.trim().toLowerCase();
+  const names=allCustomerNames().filter(n=>!q||n.toLowerCase().includes(q)||addrsFor(n).some(a=>(addrLine(a)+" "+(a.label||"")).toLowerCase().includes(q))).sort((a,b)=>a.localeCompare(b));
+  const shown=names.slice(0,150);
+  const srcN=k=>ADDR.list.filter(a=>a.source===k).length;
+  return `<div class="stack">
+    <div class="row spread"><h1>Customers</h1><div class="row"><input id="csearch" type="search" placeholder="Customer, branch, street or city" value="${esc(custSearch)}" style="width:300px"><button class="btn primary" data-act="cust-new">New customer</button></div></div>
+    <div class="panel"><div class="hd"><h2>Address book <span class="muted" style="font-weight:600">(${ADDR.list.length.toLocaleString()} addresses)</span></h2>
+      <div class="row"><label class="btn small">Import UPS or FedEx file<input type="file" id="carrier-file" accept=".csv,text/csv" hidden></label><button class="btn small" data-act="exp-ups">Export for UPS</button><button class="btn small" data-act="exp-fedex">Export for FedEx</button></div></div>
+      <div class="bd note">From UPS: ${srcN("UPS")} · FedEx: ${srcN("FedEx")} · QuickBooks: ${srcN("QuickBooks")} · Entered here: ${srcN("Manual")}. This is the main list of ship-to addresses. QuickBooks imports only add addresses for customers who don't have one.</div></div>
+    <div class="panel"><div class="tablewrap"><table class="list"><thead><tr><th>Customer</th><th class="num">Addresses</th><th>Default ship-to</th><th>Source</th></tr></thead><tbody>
+    ${shown.map(n=>{const as=addrsFor(n);const d=as[0];return `<tr class="click" data-go="cust-${encodeURIComponent(n)}"><td><b>${esc(n)}</b>${qboFor(n)?"":' <span class="note">not in QuickBooks</span>'}</td><td class="num">${as.length}</td><td style="white-space:normal">${d?esc(addrLine(d)):'<span class="muted">none</span>'}</td><td>${d?esc(d.source):""}</td></tr>`}).join("")||'<tr><td colspan="4"><div class="empty">No customers match.</div></td></tr>'}
+    </tbody></table></div>${names.length>shown.length?`<div class="bd note">Showing 150 of ${names.length}. Search to narrow the list.</div>`:""}</div></div>`;
+}
+function addrForm(e){
+  const d=e.data;
+  return `<div class="panel"><div class="bd stack"><h2>${e.id==="new"?"New address":"Edit address"}</h2>
+    <div class="grid g3">${AB_FIELDS.map(([k,l])=>`<label class="f">${l}<input id="ab-${k}" data-ab="${k}" value="${esc(d[k]||"")}" ${k==="state"||k==="zip"?'class="mono"':""}></label>`).join("")}</div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="ab-res" data-ab="residential" ${d.residential?"checked":""}>Residential address</label><label class="toggle"><input type="checkbox" id="ab-def" data-ab="isDefault" ${d.isDefault?"checked":""}>Default for this customer</label></div>
+    <div class="row"><button class="btn primary" data-act="ab-save">Save address</button><button class="btn" data-act="ab-cancel">Cancel</button></div></div></div>`;
+}
+function viewCustomer(name){
+  if(ADDR.state!=="ready")return viewCustomers();
+  if(name==="+new"){if(!addrEdit||!addrEdit.isNewCust)addrEdit={id:"new",customer:"",isNewCust:true,data:{country:"US",isDefault:true}};
+    return `<div class="stack"><div><div class="crumb"><a href="#customers">Customers</a></div><h1>New customer</h1></div>
+      <p class="muted" style="margin:0;max-width:70ch">Use the QuickBooks name when the customer is in QuickBooks, so jobs link to it.</p>
+      <label class="f" style="max-width:420px">Customer name<input id="ab-customer" data-ac="clients" autocomplete="off"></label>${addrForm(addrEdit)}</div>`}
+  const c=qboFor(name);const as=addrsFor(name);
+  const editing_=addrEdit&&ckey(addrEdit.customer)===ckey(name)?addrEdit:null;
+  const jobsN=[...S.orders.values()].filter(o=>ckey(o.client)===ckey(name)).length;
+  return `<div class="stack"><div><div class="crumb"><a href="#customers">Customers</a></div>
+    <div class="row spread"><h1>${esc(name)}</h1><button class="btn primary" data-act="ab-new" data-c="${esc(name)}">Add address</button></div></div>
+    <div class="panel"><div class="bd grid g3"><div><div class="note">Contact (QuickBooks)</div>${esc(c&&c.contact)||'<span class="muted">—</span>'}</div><div><div class="note">Email(s)</div>${esc(c&&c.emails.join(", "))||'<span class="muted">—</span>'}</div><div><div class="note">Phone</div>${esc(c&&formatPhone(phoneMain(c.phone)))||'<span class="muted">—</span>'}</div></div>
+      <div class="bd note" style="padding-top:0">${c?"":"Not in QuickBooks. "}${jobsN} job${jobsN===1?"":"s"} in the app.</div></div>
+    ${editing_?addrForm(editing_):""}
+    ${as.map(a=>`<div class="panel"><div class="bd row spread" style="align-items:flex-start">
+      <div class="stack" style="gap:2px"><div><b>${esc(addrTitle(a))}</b> ${a.isDefault?'<span class="jstat approved">Default</span>':""} <span class="chip none" style="text-transform:none">${esc(a.source)}</span></div>
+        <div>${esc(a.company||"")}${a.attn?` · Attn: ${esc(a.attn)}`:""}</div><div>${esc(addrLine(a))}${a.country&&a.country!=="US"?" · "+esc(a.country):""}</div>
+        <div class="note">${[a.phone&&formatPhone(a.phone)+(a.ext?" x"+a.ext:""),a.email,a.residential?"Residential":""].filter(Boolean).map(esc).join(" · ")}</div></div>
+      <div class="row">${a.isDefault?"":`<button class="btn small" data-act="ab-default" data-id="${a.id}">Make default</button>`}<button class="btn small" data-act="ab-edit" data-id="${a.id}">Edit</button><button class="btn small danger" data-act="ab-del" data-id="${a.id}">Delete</button></div>
+    </div></div>`).join("")||'<div class="empty">No addresses yet. Choose <b>Add address</b>.</div>'}
+  </div>`;
+}
+
+/* ----- ship-to on a job ----- */
+function shipPicker(o){
+  if(ADDR.state!=="ready"||!o.client)return "";
+  const as=addrsFor(o.client);
+  const cur=o.shipAddrId&&as.find(a=>a.id===o.shipAddrId);
+  const changed=cur&&JSON.stringify(stripShip(addrToShip(cur,o)))!==JSON.stringify(stripShip(shipAddr(o)));
+  return `<div class="row" style="align-items:flex-end">
+    <label class="f" style="min-width:280px;flex:1">Address book (${as.length})<select id="o-addrsel"><option value="">${as.length?"Choose an address…":"No addresses for this customer yet"}</option>${as.map(a=>`<option value="${a.id}" ${o.shipAddrId===a.id?"selected":""}>${esc(addrTitle(a))} — ${esc(addrLine(a))}${a.isDefault?" (default)":""}</option>`).join("")}</select></label>
+    ${cur&&changed?`<button class="btn small" data-act="ab-update-from-job">Update this address in the address book</button>`:""}
+    <button class="btn small" data-act="ab-new-from-job">Save as a new address for ${esc(o.client)}</button>
+    <a class="btn small" href="#cust-${encodeURIComponent(o.client)}">Manage addresses</a></div>`;
+}
+const stripShip=s=>{const {check,...r}=s||{};Object.keys(r).forEach(k=>{r[k]=String(r[k]||"").trim()});return r};
+function shipToAddr(o,base){const s=shipAddr(o);const [p,ext]=String(s.phone||"").split(/\s*x\s*/i);
+  return {...(base||{}),customer:o.client,company:s.company||o.client,attn:s.attn,street1:s.street1,street2:s.street2,street3:"",city:s.city,state:s.state,zip:s.zip,country:(base&&base.country)||"US",phone:p||"",ext:ext||"",email:s.email}}
+
 function carriersPanel(){
   if(!S.carrierEdit)S.carrierEdit=clone(carriers());
   return `<div class="panel"><div class="hd"><h2>Shipping carriers</h2><button class="btn primary small" data-act="save-carriers">Save</button></div><div class="bd stack">
@@ -1671,7 +1952,7 @@ function closeCamera(){camStop();const ov=$("#cam");if(ov)ov.remove()}
 
 /* ---------- autocomplete for client, tech, size and other lists ---------- */
 const AC_SRC={clients:()=>QBO.state==="ready"&&QBO.list.length?QBO.list.map(c=>c.name):[...new Set([...(S.lists.clients||[]),...HIST.customers])],
-  techs:()=>S.lists.techs||[],sizes:()=>S.lists.sizes||[],mfr:()=>S.lists.manufacturers||[],models:()=>S.lists.models||[],regs:()=>S.lists.registrations||[],locs:()=>S.lists.locations||[]};
+  custs:()=>allCustomerNames(),techs:()=>S.lists.techs||[],sizes:()=>S.lists.sizes||[],mfr:()=>S.lists.manufacturers||[],models:()=>S.lists.models||[],regs:()=>S.lists.registrations||[],locs:()=>S.lists.locations||[]};
 const AC_MIN=3,AC_MAX=6,AC_SHORT=40;
 function acMatches(key,q){
   const all=(AC_SRC[key]||(()=>[]))();q=String(q||"").trim().toLowerCase();
