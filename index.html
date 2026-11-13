@@ -299,9 +299,9 @@ const rangeTxt=lim=>lim?`${lim[0].toFixed(1)}–${lim[1].toFixed(1)}%`:"no limit
 /* ---------- routing ---------- */
 function route(){
   const h=decodeURIComponent(location.hash.slice(1));
-  for(const p of ["job","meter","report","hist","email","cust"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
+  for(const p of ["job","meter","report","hist","email","cust","req"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
   if(h.startsWith("order-"))return{v:"job",id:h.slice(6)};
-  if(h==="review"||h==="setup"||h==="perf"||h==="customers"||h==="addrimport")return{v:h};
+  if(h==="review"||h==="setup"||h==="perf"||h==="customers"||h==="addrimport"||h==="requests"||h==="reqnew")return{v:h};
   return{v:"jobs"};
 }
 function go(h){if(location.hash==="#"+h)render();else location.hash=h}
@@ -312,7 +312,8 @@ function render(){
   const ae=document.activeElement,fid=ae&&ae.id,selS=ae&&ae.selectionStart,selE=ae&&ae.selectionEnd;
   const r=route();
   const reviewN=[...S.meters.values()].filter(m=>m.status==="ready"||m.status==="question").length;
-  $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["customers","Customers"],["perf","Performance"],["setup","Limits &amp; lists"]]
+  const reqN=REQ.state==="ready"?reqSubmittedN():0;
+  $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["requests","Requests"+(reqN?`<span class="count">${reqN}</span>`:"")],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["customers","Customers"],["perf","Performance"],["setup","Limits &amp; lists"]]
     .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v)))?"on":""}">${t}</a>`).join("");
   $("#mode").innerHTML=account&&mode!=="signin"?`${esc(account.name||account.username||"")} · <a href="#" data-act="signout">Sign out</a>`:"";
   $("#nav").hidden=mode!=="ready";
@@ -329,6 +330,9 @@ function render(){
   else if(r.v==="setup")app.innerHTML=viewSetup();
   else if(r.v==="perf")app.innerHTML=viewPerf();
   else if(r.v==="customers")app.innerHTML=viewCustomers();
+  else if(r.v==="requests")app.innerHTML=viewRequests();
+  else if(r.v==="reqnew")app.innerHTML=viewReqNew();
+  else if(r.v==="req")app.innerHTML=viewReq(r.id);
   else if(r.v==="cust")app.innerHTML=viewCustomer(r.id);
   else if(r.v==="addrimport")app.innerHTML=viewAddrImport();
   tick();
@@ -956,6 +960,7 @@ document.addEventListener("click",async e=>{
     if(act==="qbo-fill"){const o=S.orders.get(route().id);if(!o)return;const n={...o};if(!fillFromQbo(n,true)){toast(`No QuickBooks customer or address for “${o.client}”. Pick the client from the drop-down list.`);return}
       S.orders.set(o.id,n);try{await put("orders",o.id,n);toast(n.shipAddrId?"Filled from the address book":"Filled from QuickBooks")}catch(err){toast("Couldn't save: "+err.message)}render();return}
     if(act==="track-copy"){copyText(a.dataset.t).then(ok=>{if(ok)toast("Tracking number copied. Paste it on the carrier's page.")});return}
+    if(act&&act.startsWith("req-")&&await reqAction(act,a))return;
     if(act==="addr-setup"){a.disabled=true;a.textContent="Setting up…";
       try{const n=await setupAddresses();toast(`Address book ready: ${ADDR.list.length.toLocaleString()} addresses`)}catch(err){toast("Couldn't set up the address book: "+err.message);ADDR.state=Store.hasList("addresses")?"ready":"missing"}render();return}
     if(act==="exp-ups"||act==="exp-fedex"){exportCarrier(act==="exp-ups"?"UPS":"FedEx");return}
@@ -1092,6 +1097,8 @@ document.addEventListener("input",e=>{
   const t=e.target;
   if(t.id==="jsearch"){jobSearch=t.value;render();return}
   if(t.id==="csearch"){custSearch=t.value;render();return}
+  if(t.dataset.rq&&reqDraft){reqDraft[t.dataset.rq]=t.value;return}
+  if(t.dataset.rqm&&reqMail){reqMail[t.dataset.rqm]=t.value;return}
   if(t.dataset.aimpC!==undefined&&AIMP){const r=AIMP.rows[+t.dataset.aimpC];if(r)r.customer=t.value;return}
   if(t.dataset.ab&&addrEdit&&t.type!=="checkbox"){addrEdit.data[t.dataset.ab]=t.value;return}
   if(t.dataset.cr&&S.carrierEdit){const [i,k]=t.dataset.cr.split("|");if(S.carrierEdit[+i])S.carrierEdit[+i][k]=t.value;return}
@@ -1130,6 +1137,9 @@ document.addEventListener("change",async e=>{
   if(t.dataset.onrep!==undefined&&editing){const i=+t.dataset.onrep;const ph=editing.draft.photos[i];if(!ph)return;
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
+  if(t.id==="req-filter"){reqFilter=t.value;render();return}
+  if(t.id==="rq-customer"&&reqDraft){reqDraft.customer=t.value;const pf=reqPrefillFromCustomer(t.value);["contact","email","phone"].forEach(k=>{if(!reqDraft[k]&&pf[k]){reqDraft[k]=pf[k];const el=$("#rq-"+k);if(el)el.value=pf[k]}});
+    const h=$("#rq-hint");if(h){const c=qboFor(t.value);const ad=reqAddresses(t.value);h.innerHTML=t.value.trim()?`<div class="note">${c?"QuickBooks customer.":"Not in QuickBooks; it will be added as a new customer name."} ${ad.shipTo?"Their default return address will be filled in on the form.":"No return address on file; they'll type it."}</div>`:""}return}
   if(t.id==="jfilter"){jobFilter=t.value;render();return}
   if(t.dataset.ret){const m=S.meters.get(t.dataset.ret);const o=m&&S.orders.get(m.orderId);if(!m)return;const want=t.checked?"return":"scrap";
     const n={...m,disposition:want===((o&&o.disposition)||"return")?"":want};S.meters.set(m.id,n);try{await put("meters",m.id,n)}catch(err){toast("Couldn't save: "+err.message)}render();return}
@@ -1158,7 +1168,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.10.0";
+const APP_VERSION="1.11.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1186,13 +1196,14 @@ async function gfetch(path,opt={}){
   }
   throw new Error("Microsoft is busy right now. Try again in a minute.");
 }
-const LISTCOLS={orders:["Estimate","PO","Received"],meters:["JobId","Serial","Status","TestDate","Tech"],config:[],addresses:["Customer","City","State","Zip","Source"]};
-const OPT_LISTS={addresses:"MTA Addresses"}; // optional lists, created when first needed
+const LISTCOLS={orders:["Estimate","PO","Received"],meters:["JobId","Serial","Status","TestDate","Tech"],config:[],addresses:["Customer","City","State","Zip","Source"],requests:["Status","Customer"]};
+const OPT_LISTS={addresses:"MTA Addresses",requests:"MTA Requests"}; // optional lists, created when first needed
 function fieldsFor(coll,o){
   const {id,...rest}=o;const f={Data:JSON.stringify(rest)};
   if(coll==="orders"){f.Title=o.client||"";f.Estimate=o.estimate||"";f.PO=o.po||"";f.Received=o.received||""}
   if(coll==="meters"){f.Title=String(o.wo||"");f.JobId=String(o.orderId||"");f.Serial=o.serial||"";f.Status=o.status||"";f.TestDate=o.testDate||"";f.Tech=o.tech||""}
   if(coll==="config"){f.Title=o.key||""}
+  if(coll==="requests"){f.Title=o.customer||"";f.Customer=o.customer||"";f.Status=REQ_STATUS[o.status]||o.status||""}
   if(coll==="addresses"){f.Title=o.label||o.company||"";f.Customer=o.customer||"";f.City=o.city||"";f.State=o.state||"";f.Zip=o.zip||"";f.Source=o.source||""}
   return f;
 }
@@ -1262,12 +1273,13 @@ const GraphStore={
   },
   async fileUrl(itemId){const it=await gfetch(`/sites/${siteId}/drive/items/${itemId}`);return it["@microsoft.graph.downloadUrl"]},
   async removeFile(itemId){await gfetch(`/sites/${siteId}/drive/items/${itemId}`,{method:"DELETE"})},
+  async grantSite(appId){return gfetch(`/sites/${siteId}/permissions`,{method:"POST",scopes:[...SCOPES,"https://graph.microsoft.com/Sites.FullControl.All"],json:{roles:["write"],grantedToIdentities:[{application:{id:appId,displayName:"MTA Request Form"}}]}})},
   async renameFile(itemId,name){return gfetch(`/sites/${siteId}/drive/items/${itemId}`,{method:"PATCH",json:{name,"@microsoft.graph.conflictBehavior":"rename"}})},
   siteUrl(){return `https://${CFG.siteHost}${CFG.sitePath}`}
 };
 /* Test mode (?mock): keeps everything in memory so the screens can be tried without Microsoft. */
 const MockStore={
-  data:{orders:new Map(),meters:new Map(),config:new Map(),addresses:new Map()},files:new Map(),n:1,ready:false,lists:{},
+  data:{orders:new Map(),meters:new Map(),config:new Map(),addresses:new Map(),requests:new Map()},files:new Map(),n:1,ready:false,lists:{},
   async connect(){return this.ready},
   hasList(k){return !!this.lists[k]},async ensureList(k){this.lists[k]=true},
   async createMany(coll,list,progress){const ids=[];for(const o of list){ids.push(await this.create(coll,o));if(progress)progress(ids.length,list.length)}return ids},
@@ -1284,6 +1296,7 @@ const MockStore={
   async fileUrl(itemId){const f=this.files.get(itemId);return f?URL.createObjectURL(f.blob):""},
   async removeFile(itemId){this.files.delete(itemId)},
   async renameFile(itemId,name){return {id:itemId,name}},
+  async grantSite(appId){return {id:"mock"}},
   siteUrl(){return "#"}
 };
 const Store=MOCK?MockStore:GraphStore;
@@ -1328,7 +1341,7 @@ setInterval(async()=>{
 },8000);
 async function refresh(){
   if(document.hidden||mode!=="ready")return;
-  try{await flushSave();await loadAll();if(ADDR.state==="ready"&&["customers","cust","job"].includes(route().v))await loadAddresses();softRender()}catch(e){}
+  try{await flushSave();await loadAll();if(ADDR.state==="ready"&&["customers","cust","job"].includes(route().v))await loadAddresses();if(REQ.state==="ready")await loadRequests();softRender()}catch(e){}
 }
 
 /* ---------- start ---------- */
@@ -1349,7 +1362,7 @@ async function afterSignIn(){
     const ok=await Store.connect();
     if(!ok){mode="setup";render();return}
     await loadAll();mode="ready";render();
-    loadHistory();loadQbo();loadAddresses().then(softRender);
+    loadHistory();loadQbo();loadAddresses().then(softRender);loadRequests().then(softRender);
     clearInterval(refreshTimer);refreshTimer=setInterval(refresh,60000);
   }catch(e){mode="error";loadError=e.status===403||e.status===401?"Your Microsoft account doesn't have access to the Meter Testing App SharePoint site. Ask Hayes to add you as a member. ("+e.message+")":e.message;render()}
 }
@@ -1451,7 +1464,7 @@ function viewHist(wo){
 
 /* ---------- setup & data (on the Limits & lists page) ---------- */
 function viewDataPanel(){
-  return emailSettingsPanel()+carriersPanel()+viewDataPanel2();
+  return emailSettingsPanel()+requestFormPanel()+carriersPanel()+viewDataPanel2();
 }
 function viewDataPanel2(){
   const links=Object.entries(S.settings.techLinks||{}).map(([e,t])=>`${e} = ${t}`).join("\n");
@@ -1660,6 +1673,174 @@ function contactPanel(o){
         <label class="f">Date<input id="sh-date" type="date" value="${today()}"></label>
         <button class="btn small primary" data-act="ship-add">Mark shipped</button></div>
     </div></div>`;
+}
+/* ---------- customer meter requests: a link the customer fills in (request.html), saved in SharePoint list "MTA Requests" ---------- */
+const REQ={state:"idle",list:[],err:""};
+const REQ_DAYS=60;
+const REQ_STATUS={sent:"Waiting for customer",submitted:"Submitted",converted:"Job created",cancelled:"Cancelled"};
+const REQ_CLS={sent:"info",submitted:"warn",converted:"approved",cancelled:"done"};
+const BIG_REQUEST=40; // more meters than this: create the job without individual meters (batch-size)
+let reqFilter="open",reqDraft=null,reqMail=null;
+async function loadRequests(){
+  if(!Store.hasList("requests")){REQ.state="missing";return}
+  try{REQ.list=await Store.all("requests");REQ.state="ready"}
+  catch(e){REQ.state="error";REQ.err=e.message}
+}
+const reqData=r=>r;
+const reqRef=r=>"R"+r.id;
+const reqMeters=r=>((r.submission&&r.submission.meters)||[]).reduce((a,m)=>a+(Math.max(1,num(m.qty)||1)),0);
+function reqToken(){const b=new Uint8Array(24);crypto.getRandomValues(b);return btoa(String.fromCharCode(...b)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
+const reqApi=()=>String(S.settings.requestApi||"").trim().replace(/^https?:\/\//,"").replace(/\/.*$/,"");
+function reqLink(r){return `${location.origin}${location.pathname.replace(/[^/]*$/,"")}request.html#r=${r.id}.${r.token}&api=${encodeURIComponent(reqApi())}`}
+function reqChip(r){const st=r.status==="sent"&&r.expires&&Date.now()>r.expires?"expired":r.status;return `<span class="jstat ${st==="expired"?"done":REQ_CLS[st]||"info"}">${st==="expired"?"Link expired":REQ_STATUS[st]||st}</span>`}
+/* the customer's form writes to the same record, so always start from the latest copy and change only our own fields */
+async function saveReq(r,changes){const fresh=await Store.get("requests",r.id);const d={...fresh,...changes};delete d.id;stamp(d);await Store.update("requests",r.id,d);
+  const i=REQ.list.findIndex(x=>x.id===r.id);const n={...d,id:r.id};if(i>=0)REQ.list[i]=n;return n}
+const reqSubmittedN=()=>REQ.list.filter(r=>r.status==="submitted").length;
+
+function viewRequests(){
+  if(REQ.state==="missing")return `<div class="panel" style="max-width:640px;margin:30px auto"><div class="bd stack"><h1>Customer requests</h1>
+    <p class="muted" style="margin:0">Send customers a link to an online form instead of the paper Authorization Form. They enter their details once and list their meters; you turn the answers into a job with one click. This creates the request list in your SharePoint site.</p>
+    <button class="btn primary" data-act="req-setup" style="align-self:flex-start">Set up customer requests</button></div></div>`;
+  if(REQ.state!=="ready")return `<div class="empty">${REQ.state==="error"?"Couldn't load requests: "+esc(REQ.err):"Loading requests…"}</div>`;
+  const list=REQ.list.filter(r=>reqFilter==="all"||(reqFilter==="open"?["sent","submitted"].includes(r.status):r.status===reqFilter)).sort((a,b)=>(b.submittedAt||b.createdAt||0)-(a.submittedAt||a.createdAt||0));
+  return `<div class="stack">
+    <div class="row spread"><h1>Customer requests</h1><div class="row"><select id="req-filter" style="width:auto">${[["open","Open"],["submitted","Submitted"],["sent","Waiting for customer"],["converted","Job created"],["all","All"]].map(([v,t])=>`<option value="${v}" ${reqFilter===v?"selected":""}>${t}</option>`).join("")}</select><button class="btn primary" data-go="reqnew">New request</button></div></div>
+    ${reqApi()?"":`<div class="callout warn">The request form's online service isn't connected yet, so customers can't open the links. Finish the setup under <a href="#setup">Limits &amp; lists → Customer request form</a>. You can still create requests now.</div>`}
+    <div class="panel"><div class="tablewrap"><table class="list"><thead><tr><th>Request</th><th>Customer</th><th>Contact</th><th>Status</th><th class="num">Meters</th><th>Sent</th><th>Submitted</th></tr></thead><tbody>
+    ${list.map(r=>`<tr class="click" data-go="req-${r.id}"><td class="mono">${reqRef(r)}</td><td><b>${esc(r.customer)}</b></td><td>${esc(r.contact)}<div class="note">${esc(r.email)}</div></td><td>${reqChip(r)}</td><td class="num">${r.submission?reqMeters(r):'<span class="muted">—</span>'}</td><td>${r.createdAt?fmtDay(r.createdAt):""}</td><td>${r.submittedAt?fmtDay(r.submittedAt):'<span class="muted">—</span>'}</td></tr>`).join("")||`<tr><td colspan="7"><div class="empty">No requests here. Choose <b>New request</b> when a customer wants to send meters.</div></td></tr>`}
+    </tbody></table></div></div></div>`;
+}
+function viewReqNew(){
+  if(REQ.state!=="ready")return viewRequests();
+  if(!reqDraft)reqDraft={customer:"",contact:"",email:"",phone:"",po:"",message:""};const d=reqDraft;
+  return `<div class="stack" style="max-width:820px"><div><div class="crumb"><a href="#requests">Customer requests</a></div><h1>New request</h1></div>
+    <p class="muted" style="margin:0">Pick the customer and who the link goes to. Anything we already know (phone, addresses) is filled in on the customer's form for them to check.</p>
+    <div class="panel"><div class="bd stack"><div class="grid g2">
+      <label class="f">Customer<input id="rq-customer" data-rq="customer" data-ac="custs" autocomplete="off" value="${esc(d.customer)}" placeholder="Type to search, or a new customer's name"></label>
+      <label class="f">Contact name<input id="rq-contact" data-rq="contact" value="${esc(d.contact)}"></label>
+      <label class="f">Contact email<input id="rq-email" data-rq="email" type="email" value="${esc(d.email)}"></label>
+      <label class="f">Phone<input id="rq-phone" data-rq="phone" value="${esc(d.phone)}"></label>
+      <label class="f">PO # <span class="note">if you already have it</span><input id="rq-po" data-rq="po" value="${esc(d.po)}"></label></div>
+      <label class="f">Note shown at the top of the customer's form <span class="note">optional</span><textarea id="rq-message" data-rq="message" rows="2" placeholder="e.g. Thanks for calling. Please list the 3 meters we discussed.">${esc(d.message)}</textarea></label>
+      <div id="rq-hint"></div>
+      <div class="row"><button class="btn primary" data-act="req-create">Create request and get the link</button><a class="btn" href="#requests">Cancel</a></div></div></div></div>`;
+}
+function reqPrefillFromCustomer(name){
+  const c=qboFor(name);const out={};
+  if(c){out.contact=c.contact||"";out.email=(c.emails||[])[0]||"";out.phone=formatPhone(phoneMain(c.phone));}
+  return out;
+}
+function reqAddresses(name){
+  const c=qboFor(name);const ship=ADDR.state==="ready"?defaultAddr(name):null;
+  const shipTo=ship?{company:ship.company||name,attn:ship.attn||"",street1:ship.street1||"",street2:[ship.street2,ship.street3].filter(Boolean).join(", "),city:ship.city||"",state:ship.state||"",zip:ship.zip||""}:null;
+  let billTo=null;if(c&&c.bill){const p=parseAddr(String(c.bill).split(/\n/).slice(1).join("\n")||c.bill);if(p.street1||p.city)billTo={company:name,attn:"",street1:p.street1,street2:p.street2,city:p.city,state:p.state,zip:p.zip}}
+  return {shipTo,billTo};
+}
+function reqAddrText(a){if(!a)return "";return [a.company,a.attn?"Attn: "+a.attn:"",a.street1,a.street2,[a.city,[a.state,a.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ")].filter(x=>String(x||"").trim()).join("\n")}
+function viewReq(id){
+  const r=REQ.list.find(x=>String(x.id)===String(id));if(!r)return REQ.state==="ready"?notFound("request"):viewRequests();
+  const s=r.submission;const link=reqLink(r);const expired=r.expires&&Date.now()>r.expires;
+  const meterRows=s?s.meters.map(m=>`<tr><td class="num">${esc(m.qty)}</td><td>${esc(m.size)}</td><td>${esc(m.type)}</td><td>${esc([m.brand,m.model].filter(Boolean).join(" "))}</td><td>${esc(m.gpm)}</td><td>${esc(m.location)}</td><td>${m.service==="clean"?"Clean, test &amp; repair":"Test only"}</td><td style="white-space:pre-wrap" class="mono">${esc(m.serials)}</td><td style="white-space:pre-wrap;min-width:160px">${esc(m.notes)}</td></tr>`).join(""):"";
+  const total=reqMeters(r);const job=r.jobId&&S.orders.get(r.jobId);
+  if(reqMail&&reqMail.id!==r.id)reqMail=null;
+  return `<div class="stack"><div><div class="crumb"><a href="#requests">Customer requests</a></div>
+    <div class="row spread"><h1>${reqRef(r)} · ${esc(r.customer)} ${reqChip(r)}</h1>
+      <div class="row">${r.status==="submitted"?`<button class="btn primary" data-act="req-job" data-id="${r.id}">Create job</button>`:""}${job?`<a class="btn" href="#job-${job.id}">Open the job</a>`:""}</div></div></div>
+    ${["sent","submitted"].includes(r.status)?`<div class="panel"><div class="hd"><h2>Link for ${esc(r.contact||r.customer)}</h2><span class="note">${expired?"Expired":"Works until"} ${r.expires?fmtDay(r.expires):""}</span></div><div class="bd stack">
+      <div class="row" style="flex-wrap:nowrap"><input id="rq-link" readonly value="${esc(link)}" class="mono" style="flex:1;min-width:0" aria-label="Link for the customer"><button class="btn" data-act="req-copy">Copy link</button></div>
+      <div class="row"><button class="btn ${r.sentAt?"":"primary"}" data-act="req-mail-open">${r.sentAt?"Email the link again":"Email the link"}</button>${expired?`<button class="btn" data-act="req-extend">Extend ${REQ_DAYS} days</button>`:`<button class="btn small" data-act="req-extend">Extend ${REQ_DAYS} days</button>`}<button class="btn small" data-act="req-cancel">Cancel request</button></div>
+      ${r.sentAt?`<div class="note">Emailed to ${esc(r.sentTo||r.email)} on ${fmtDay(r.sentAt)} ${fmtTime(r.sentAt)}${r.sentBy?" by "+esc(r.sentBy):""}.</div>`:`<div class="note">Email it from shop@ here, or copy the link into your own Outlook email.</div>`}
+      ${reqApi()?"":`<div class="callout warn">Customers can't open the link until the request form service is connected (Limits &amp; lists → Customer request form).</div>`}
+      ${reqMail?reqMailBox(r):""}
+    </div></div>`:""}
+    ${s?`<div class="panel"><div class="hd"><h2>What the customer sent</h2><span class="note">${r.submitCount>1?`Updated ${r.submitCount-1} time${r.submitCount>2?"s":""} · `:""}${fmtDay(r.submittedAt)} ${fmtTime(r.submittedAt)}</span></div>
+      <div class="bd grid g3"><div><div class="note">Company</div><b>${esc(s.company)}</b></div><div><div class="note">Contact</div>${esc(s.contact)}<br>${esc(s.phone)}<br>${esc(s.email)}</div><div><div class="note">PO #</div>${esc(s.po)||'<span class="muted">—</span>'}</div>
+        <div><div class="note">Return to</div><div style="white-space:pre-line">${esc(reqAddrText(s.shipTo))}</div></div><div><div class="note">Bill to</div><div style="white-space:pre-line">${esc(reqAddrText(s.billTo))||'<span class="muted">Same as return</span>'}</div></div>
+        <div><div class="note">Instructions</div>${s.callFirst?'<b>Call or email with an estimate before any work.</b><br>':""}<span style="white-space:pre-wrap">${esc(s.instructions)}</span></div></div>
+      <div class="tablewrap"><table class="list"><thead><tr><th class="num">Qty</th><th>Size</th><th>Type</th><th>Brand / model</th><th>GPM</th><th>Location</th><th>Service</th><th>Serials</th><th>Notes</th></tr></thead><tbody>${meterRows}</tbody></table></div>
+      <div class="bd note">${total} meter${total===1?"":"s"} in all.${r.status==="submitted"?(total>BIG_REQUEST?` That's a batch-size job, so <b>Create job</b> makes the job without ${total} separate meter records; the meter list goes in a job note.`:` <b>Create job</b> makes the job (status Not received) with ${total} meter${total===1?"":"s"} filled in from this list.`):""}</div></div>`
+    :`<div class="panel"><div class="bd note">The customer hasn't sent the form yet.${r.message?` Your note on their form: “${esc(r.message)}”`:""}</div></div>`}
+  </div>`;
+}
+function reqMailBox(r){const m=reqMail;
+  return `<div class="panel" style="border-color:var(--accent)"><div class="bd stack"><div class="grid g2"><label class="f">To<input id="rqm-to" data-rqm="to" value="${esc(m.to)}"></label><label class="f">Subject<input id="rqm-subject" data-rqm="subject" value="${esc(m.subject)}"></label></div>
+    <label class="f">Message<textarea id="rqm-body" data-rqm="body" rows="9">${esc(m.body)}</textarea></label>
+    <div class="row"><button class="btn primary" data-act="req-mail-send">Send from ${esc(emailCfg("shopEmail"))}</button><button class="btn" data-act="req-mail-cancel">Cancel</button></div></div></div>`}
+function reqMailDraft(r){const first=String(r.contact||"").trim().split(/\s+/)[0];
+  return {id:r.id,to:r.email||"",subject:"Sending meters to Mid America Meter for testing",
+    body:`Hi ${first||"there"},\n\nThanks for choosing Mid America Meter. Please use this link to tell us about the meters you're sending. You enter your details once and list each kind of meter, with a quantity for identical meters:\n\n${reqLink(r)}\n\nWhen you send the form, you'll get our shipping address and a packing slip to put in the box. You can use the same link to make changes until we receive your meters. The link works until ${fmtDay(r.expires)}.\n\nThanks,\n${S.myTech||(account&&account.name)||"Mid America Meter"}\nMid America Meter, Inc.\n763-478-8041`}}
+const REQ_TYPE={"Displacement (disk/piston)":"Displacement","Single-jet":"Singlejet","Multi-jet":"Multi-jet","Turbine":"Turbine","Propeller":"Propeller","Compound":"Compound","Electromagnetic":"Electromagnetic","Ultrasonic":"Ultrasonic"};
+async function reqCreateJob(r,btn){
+  const s=r.submission;if(!s)return;const total=reqMeters(r);
+  btn.disabled=true;btn.textContent="Creating…";
+  const ship=s.shipTo?{company:s.shipTo.company||s.company,attn:s.shipTo.attn||s.contact,street1:s.shipTo.street1,street2:s.shipTo.street2,city:s.shipTo.city,state:s.shipTo.state,zip:s.shipTo.zip,phone:formatPhone(s.phone),email:s.email,check:false}:null;
+  const notes=[];const now=Date.now();const by=S.myTech||(account&&account.name)||userName();
+  const lines=[`From customer request ${reqRef(r)}.`];if(s.callFirst)lines.push("Customer asked for a call or email with an estimate before any work.");if(s.instructions)lines.push("Customer's instructions: "+s.instructions);
+  const bt=reqAddrText(s.billTo);if(bt)lines.push("Bill to:\n"+bt);
+  if(total>BIG_REQUEST)lines.push("Meters listed by the customer:\n"+s.meters.map(m=>`${m.qty} × ${[m.size,m.type,m.brand,m.model].filter(Boolean).join(" ")}${m.service==="clean"?" (clean, test & repair)":" (test only)"}${m.notes?" — "+m.notes:""}`).join("\n"));
+  notes.push({id:uid("n"),text:lines.join("\n"),by,at:now});
+  const o={client:r.customer||s.company,contact:s.contact,emails:s.email,phone:formatPhone(s.phone),po:s.po||"",approval:s.po?"po":"",received:"",status:"Not received",statusLog:[{status:"Not received",at:now,by,auto:true}],
+    showPassFail:true,disposition:"return",ship,shipAddrId:"",notes,requestId:r.id,time:[]};
+  try{
+    const oid=await createRec("orders",o);let made=0;
+    if(total<=BIG_REQUEST){
+      for(const m of s.meters){const serials=String(m.serials||"").split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);const q=Math.max(1,num(m.qty)||1);
+        const type=REQ_TYPE[m.type]||"";const cmt=[m.gpm?`Customer: meter operates at ${m.gpm} GPM.`:"",!type&&m.type&&m.type!=="Not sure"?`Customer's meter type: ${m.type}.`:"",m.notes?`Customer's notes: ${m.notes}`:""].filter(Boolean).join("\n");
+        for(let k=0;k<q;k++){btn.textContent=`Creating meter ${made+1} of ${total}…`;
+          const mt={orderId:oid,wo:nextWo(),serial:serials[k]||"",size:m.size||"",mfr:m.brand||"",model:m.model||"",type,registration:"",location:m.location||"",instructions:m.service==="clean"?"Clean, repair and test":"Test only",setting:"Shop",dateIn:"",dateOut:"",testDate:"",tech:"",
+            reads:{},pctDirect:false,volMode:"rig",custom:false,calibrated:false,before:[],after:[],parts:"",comments:cmt,photos:[],status:"in_progress",question:"",answer:""};
+          normalize(mt);await createRec("meters",mt);made++}}
+    }
+    // keep a new return address in the address book
+    if(ship&&ADDR.state==="ready"&&ship.street1&&!addrsFor(o.client).some(a=>addrKey(a)===addrKey(ship))){
+      try{await addrCreateMany([{customer:o.client,label:"",company:ship.company,attn:ship.attn,street1:ship.street1,street2:ship.street2,city:ship.city,state:ship.state,zip:ship.zip,country:"US",phone:ship.phone,email:ship.email,isDefault:!addrsFor(o.client).length,source:"Manual"}])}catch(e){}}
+    await saveReq(r,{status:"converted",jobId:oid,convertedAt:Date.now(),convertedBy:by});
+    toast(made?`Job created with ${made} meter${made===1?"":"s"}`:"Job created");go("job-"+oid);
+  }catch(e){btn.disabled=false;btn.textContent="Create job";toast("Couldn't create the job: "+e.message)}
+}
+function requestFormPanel(){
+  const api=reqApi(),cid=S.settings.requestAppId||"";
+  return `<div class="panel"><div class="hd"><h2>Customer request form</h2><button class="btn primary small" data-act="req-save-settings">Save</button></div><div class="bd stack">
+    <div class="note">Customers open the request link on a public page. A small online service saves their answers into your SharePoint site. Set it up once; the steps are in the setup guide Claude gave you.</div>
+    <div class="grid g2"><label class="f">Service address<input id="rs-api" value="${esc(api)}" placeholder="mta-requests.your-name.workers.dev"></label>
+      <label class="f">Request form app ID (from Microsoft Entra)<input id="rs-appid" value="${esc(cid)}" placeholder="00000000-0000-0000-0000-000000000000" class="mono"></label></div>
+    <div class="row"><button class="btn small" data-act="req-grant">Allow the request form to save to this site</button><button class="btn small" data-act="req-test">Test the service</button>${S.settings.requestGrantedAt?`<span class="note">Allowed ${fmtDay(S.settings.requestGrantedAt)}</span>`:""}</div>
+  </div></div>`;
+}
+
+async function reqAction(act,a){
+  const by=S.myTech||(account&&account.name)||userName();
+  const cur=()=>REQ.list.find(x=>String(x.id)===String(route().id));
+  if(act==="req-setup"){a.disabled=true;a.textContent="Setting up…";try{await Store.ensureList("requests");await loadRequests();toast("Customer requests are ready")}catch(err){toast("Couldn't set up requests: "+err.message);a.disabled=false;a.textContent="Set up customer requests"}render();return true}
+  if(act==="req-create"){const d=reqDraft||{};const customer=String(d.customer||"").trim(),email=String(d.email||"").trim();
+    if(!customer){toast("Enter the customer.");$("#rq-customer").focus();return true}
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){toast("Enter the contact's email address.");$("#rq-email").focus();return true}
+    a.disabled=true;const ad=reqAddresses(customer);
+    const rec={token:reqToken(),status:"sent",createdAt:Date.now(),createdByName:by,expires:Date.now()+REQ_DAYS*864e5,customer,contact:String(d.contact||"").trim(),email,phone:formatPhone(d.phone),po:String(d.po||"").trim(),
+      messageToCustomer:String(d.message||"").trim(),message:String(d.message||"").trim(),billTo:ad.billTo,shipTo:ad.shipTo?{...ad.shipTo,attn:ad.shipTo.attn||String(d.contact||"").trim()}:null};
+    try{stamp(rec);const id=await Store.create("requests",rec);const r={...rec,id:String(id)};REQ.list.push(r);reqDraft=null;reqMail=reqMailDraft(r);go("req-"+r.id);toast("Request created. Check the email below and send it, or copy the link.")}
+    catch(err){a.disabled=false;toast("Couldn't create the request: "+err.message)}return true}
+  const r=cur();if(!r&&!["req-save-settings","req-grant","req-test"].includes(act))return false;
+  if(act==="req-copy"){const ok=await copyText(reqLink(r));toast(ok?"Link copied. Paste it into your email.":"Couldn't copy. Select the link and copy it.");return true}
+  if(act==="req-mail-open"){reqMail=reqMailDraft(r);render();const f=$("#rqm-body");if(f)f.focus();return true}
+  if(act==="req-mail-cancel"){reqMail=null;render();return true}
+  if(act==="req-mail-send"){const m=reqMail;const to=String(m.to||"").split(/[,;\s]+/).filter(x=>/@/.test(x));if(!to.length){toast("Enter an email address.");return true}
+    a.disabled=true;a.textContent="Sending…";
+    try{await Store.sendMail({from:emailCfg("shopEmail"),to,cc:[],subject:m.subject,body:m.body,attachments:[]});await saveReq(r,{sentAt:Date.now(),sentTo:to.join(", "),sentBy:by});reqMail=null;toast("Link emailed to "+to.join(", "))}
+    catch(err){toast("Couldn't send: "+err.message);a.disabled=false;a.textContent="Send"}render();return true}
+  if(act==="req-extend"){try{await saveReq(r,{expires:Date.now()+REQ_DAYS*864e5});toast(`The link now works until ${fmtDay(Date.now()+REQ_DAYS*864e5)}`)}catch(err){toast("Couldn't save: "+err.message)}render();return true}
+  if(act==="req-cancel"){if(!confirmClick(a,"Click again to cancel"))return true;try{await saveReq(r,{status:"cancelled",cancelledAt:Date.now(),cancelledBy:by});toast("Request cancelled. The link no longer works.")}catch(err){toast("Couldn't save: "+err.message)}render();return true}
+  if(act==="req-job"){if(!confirmClick(a,`Click again to create the job`))return true;let fresh=r;try{fresh={...await Store.get("requests",r.id)}}catch(e){}
+    if(fresh.status!=="submitted"){toast("This request isn't waiting to be turned into a job.");return true}await reqCreateJob(fresh,a);return true}
+  if(act==="req-save-settings"){S.settings.requestApi=($("#rs-api").value||"").trim().replace(/^https?:\/\//,"").replace(/\/.*$/,"");S.settings.requestAppId=($("#rs-appid").value||"").trim();
+    try{await putConfig("settings",S.settings);toast("Request form settings saved")}catch(err){toast("Couldn't save: "+err.message)}render();return true}
+  if(act==="req-grant"){const id=($("#rs-appid").value||"").trim();if(!/^[0-9a-f-]{36}$/i.test(id)){toast("Paste the request form app's ID (a long code with dashes) first.");return true}
+    a.disabled=true;try{await Store.grantSite(id);S.settings.requestAppId=id;S.settings.requestGrantedAt=Date.now();await putConfig("settings",S.settings);toast("The request form can now save to this site")}
+    catch(err){a.disabled=false;toast(err.status===403?"Only a Microsoft 365 admin can do this. Sign in as an admin and try again.":"Couldn't allow it: "+err.message)}render();return true}
+  if(act==="req-test"){const api=($("#rs-api").value||"").trim().replace(/^https?:\/\//,"").replace(/\/.*$/,"");if(!api){toast("Enter the service address first.");return true}
+    try{const res=await fetch(`https://${api}/health`);const j=await res.json();toast(j.ok?"The request form service is running.":"The service answered, but not as expected.")}catch(err){toast("Couldn't reach the service at "+api)}return true}
+  return false;
 }
 /* ---------- address book (SharePoint list "MTA Addresses"): the main source of ship-to addresses ---------- */
 const ADDR={state:"idle",list:[],err:""};

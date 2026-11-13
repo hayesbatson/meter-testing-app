@@ -1,0 +1,10 @@
+name = "mta-requests"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+[vars]
+SITE = "midamericameter365.sharepoint.com:/sites/Metertestingapp"
+ALLOWED_ORIGIN = "https://hayesbatson.github.io"
+TENANT_ID = "69332761-6e8e-4d55-935b-eb1629b4aa63"
+# CLIENT_ID and CLIENT_SECRET are set as Worker secrets by the GitHub Action (from the repo's secrets)

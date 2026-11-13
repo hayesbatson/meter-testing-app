@@ -1,0 +1,33 @@
+# Deploys the request-form service (worker/) to Cloudflare whenever it changes, or on demand from the Actions tab.
+# Needs these repository secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET.
+name: Deploy request form service
+on:
+  push:
+    branches: [main]
+    paths: ["worker/**", ".github/workflows/deploy-worker.yml"]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that the Cloudflare and Microsoft secrets are set
+        id: check
+        env:
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          MS: ${{ secrets.MS_CLIENT_SECRET }}
+        run: |
+          if [ -n "$CF" ] && [ -n "$MS" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "ready=false" >> "$GITHUB_OUTPUT"; echo "::notice::Secrets not set yet, so nothing was deployed."; fi
+      - name: Deploy to Cloudflare Workers
+        if: steps.check.outputs.ready == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          secrets: |
+            CLIENT_ID
+            CLIENT_SECRET
+        env:
+          CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
