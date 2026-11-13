@@ -1168,7 +1168,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.11.0";
+const APP_VERSION="1.11.1";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1809,6 +1809,10 @@ function requestFormPanel(){
   </div></div>`;
 }
 
+function reqReadSettings(){const ai=$("#rs-api"),ci=$("#rs-appid");let changed=false;
+  if(ai){const v=(ai.value||"").trim().replace(/^https?:\/\//,"").replace(/\/.*$/,"");if(v!==(S.settings.requestApi||"")){S.settings.requestApi=v;changed=true}}
+  if(ci){const v=(ci.value||"").trim();if(v!==(S.settings.requestAppId||"")){S.settings.requestAppId=v;changed=true}}
+  return changed}
 async function reqAction(act,a){
   const by=S.myTech||(account&&account.name)||userName();
   const cur=()=>REQ.list.find(x=>String(x.id)===String(route().id));
@@ -1833,13 +1837,19 @@ async function reqAction(act,a){
   if(act==="req-cancel"){if(!confirmClick(a,"Click again to cancel"))return true;try{await saveReq(r,{status:"cancelled",cancelledAt:Date.now(),cancelledBy:by});toast("Request cancelled. The link no longer works.")}catch(err){toast("Couldn't save: "+err.message)}render();return true}
   if(act==="req-job"){if(!confirmClick(a,`Click again to create the job`))return true;let fresh=r;try{fresh={...await Store.get("requests",r.id)}}catch(e){}
     if(fresh.status!=="submitted"){toast("This request isn't waiting to be turned into a job.");return true}await reqCreateJob(fresh,a);return true}
-  if(act==="req-save-settings"){S.settings.requestApi=($("#rs-api").value||"").trim().replace(/^https?:\/\//,"").replace(/\/.*$/,"");S.settings.requestAppId=($("#rs-appid").value||"").trim();
+  if(act==="req-save-settings"){reqReadSettings();
     try{await putConfig("settings",S.settings);toast("Request form settings saved")}catch(err){toast("Couldn't save: "+err.message)}render();return true}
-  if(act==="req-grant"){const id=($("#rs-appid").value||"").trim();if(!/^[0-9a-f-]{36}$/i.test(id)){toast("Paste the request form app's ID (a long code with dashes) first.");return true}
-    a.disabled=true;try{await Store.grantSite(id);S.settings.requestAppId=id;S.settings.requestGrantedAt=Date.now();await putConfig("settings",S.settings);toast("The request form can now save to this site")}
+  if(act==="req-grant"){reqReadSettings();const id=S.settings.requestAppId||"";if(!/^[0-9a-f-]{36}$/i.test(id)){toast("Paste the request form app's ID (a long code with dashes) first.");return true}
+    a.disabled=true;try{await putConfig("settings",S.settings)}catch(e){}try{await Store.grantSite(id);S.settings.requestAppId=id;S.settings.requestGrantedAt=Date.now();await putConfig("settings",S.settings);toast("The request form can now save to this site")}
     catch(err){a.disabled=false;toast(err.status===403?"Only a Microsoft 365 admin can do this. Sign in as an admin and try again.":"Couldn't allow it: "+err.message)}render();return true}
-  if(act==="req-test"){const api=($("#rs-api").value||"").trim().replace(/^https?:\/\//,"").replace(/\/.*$/,"");if(!api){toast("Enter the service address first.");return true}
-    try{const res=await fetch(`https://${api}/health`);const j=await res.json();toast(j.ok?"The request form service is running.":"The service answered, but not as expected.")}catch(err){toast("Couldn't reach the service at "+api)}return true}
+  if(act==="req-test"){if(reqReadSettings()){try{await putConfig("settings",S.settings)}catch(e){}}const api=reqApi();if(!api){toast("Enter the service address first.");return true}
+    a.disabled=true;a.textContent="Testing…";let msg;
+    try{const res=await fetch(`https://${api}/health`);const j=await res.json();
+      if(!j.ok)msg="The service answered, but not as expected.";
+      else{const r2=await fetch(`https://${api}/r/999999999.${"x".repeat(24)}`);
+        msg=r2.status===404?"Everything works: the service is running and can reach this SharePoint site.":"The service is running but can't reach SharePoint yet. Click “Allow the request form…” and check the app ID."}}
+    catch(err){msg="Couldn't reach the service at "+api+". Check the address."}
+    a.disabled=false;a.textContent="Test the service";toast(msg);return true}
   return false;
 }
 /* ---------- address book (SharePoint list "MTA Addresses"): the main source of ship-to addresses ---------- */
