@@ -28,6 +28,7 @@ export default {
 
     const url = new URL(req.url);
     if (url.pathname === "/" || url.pathname === "/health") return json({ ok: true, service: "MTA Requests" });
+    if (url.pathname === "/diag") return json(await diag(env));
     const m = url.pathname.match(/^\/r\/(\d{1,9})\.([A-Za-z0-9_-]{20,64})$/);
     if (!m) return json({ error: "Not found" }, 404);
     const [, itemId, token] = m;
@@ -139,4 +140,27 @@ async function getItem(env, id) {
 async function patchItem(env, id, fields) {
   const { site, list } = await resolveIds(env);
   return graph(env, `/sites/${site}/lists/${list}/items/${id}/fields`, { method: "PATCH", json: fields });
+}
+
+/* step-by-step check of the Microsoft side; shows only which step failed and Microsoft's error code (no secrets) */
+async function diag(env) {
+  const out = { clientIdSet: !!env.CLIENT_ID, secretSet: !!env.CLIENT_SECRET, site: env.SITE };
+  try {
+    const body = new URLSearchParams({ client_id: env.CLIENT_ID, client_secret: env.CLIENT_SECRET, scope: "https://graph.microsoft.com/.default", grant_type: "client_credentials" });
+    const r = await fetch(`https://login.microsoftonline.com/${env.TENANT_ID}/oauth2/v2.0/token`, { method: "POST", body });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { out.signIn = `failed ${r.status}: ${j.error || ""} ${(j.error_description || "").split("\r\n")[0].slice(0, 200)}`; return out; }
+    out.signIn = "ok";
+    try { const p = JSON.parse(atob(j.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); out.roles = p.roles || []; out.appId = p.appid; } catch (e) {}
+    const h = { Authorization: "Bearer " + j.access_token };
+    const sr = await fetch(`https://graph.microsoft.com/v1.0/sites/${env.SITE}?$select=id,displayName`, { headers: h });
+    const sj = await sr.json().catch(() => ({}));
+    if (!sr.ok) { out.siteAccess = `failed ${sr.status}: ${sj.error && sj.error.code}`; return out; }
+    out.siteAccess = "ok (" + sj.displayName + ")";
+    const lr = await fetch(`https://graph.microsoft.com/v1.0/sites/${sj.id}/lists?$select=id,displayName&$top=200`, { headers: h });
+    const lj = await lr.json().catch(() => ({}));
+    if (!lr.ok) { out.lists = `failed ${lr.status}: ${lj.error && lj.error.code}`; return out; }
+    out.requestsList = (lj.value || []).some(x => x.displayName === LIST_NAME) ? "found" : "missing";
+  } catch (e) { out.error = String(e && e.message || e).slice(0, 200); }
+  return out;
 }

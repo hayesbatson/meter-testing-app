@@ -25,4 +25,5 @@ jobs:
           if [ "$code" = "404" ] && grep -q "isn't valid" body.txt; then echo "   SharePoint access works."
           else echo "::error::The service couldn't read SharePoint (expected before the in-app Allow step, or the MTA Requests list doesn't exist yet)"; ok=0; fi
 
+          echo "4) Details:"; curl -sS -m 30 "$API/diag"; echo
           [ "$ok" = 1 ] && echo "ALL CHECKS PASSED" || exit 1
