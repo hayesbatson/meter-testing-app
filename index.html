@@ -1172,7 +1172,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.12.3";
+const APP_VERSION="1.12.4";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1617,7 +1617,8 @@ async function qbCall(path,opt={}){const api=reqApi();if(!api)throw new Error("T
 async function saveQbCfg(){await putConfig("qbo",qbCfg())}
 async function loadQbStatus(){if(QB.loading||!reqApi())return;QB.loading=true;QB.err="";
   try{QB.status=await qbCall("/status");const c=qbCfg();const on=!!QB.status.connected;
-    const env=QB.status.env||"sandbox";if(c.connected!==on||c.env!==env){c.connected=on;c.env=env;c.company=QB.status.company||"";await saveQbCfg().catch(()=>{})}
+    const env=QB.status.env||"sandbox";if(on&&c.env&&c.env!==env){c.items=[];c.map={};c.itemsAt=0} // switched between test and real company: old item links don't apply
+    if(c.connected!==on||c.env!==env){c.connected=on;c.env=env;c.company=QB.status.company||"";await saveQbCfg().catch(()=>{})}
     if(on&&!c.items.length)await qbLoadItems().catch(()=>{})}
   catch(e){QB.err=e.message}
   QB.loading=false;softRender()}

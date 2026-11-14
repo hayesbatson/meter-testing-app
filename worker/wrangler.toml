@@ -14,5 +14,5 @@ TENANT_ID = "69332761-6e8e-4d55-935b-eb1629b4aa63"
 APP_URL = "https://hayesbatson.github.io/meter-testing-app/"
 QBO_REDIRECT = "https://mta-requests.midamericameter.workers.dev/qbo/callback"
 # "sandbox" while using Intuit's development keys; change to "production" once the production keys are in the QBO_ secrets
-QBO_ENV = "sandbox"
+QBO_ENV = "production"
 # CLIENT_ID, CLIENT_SECRET, QBO_CLIENT_ID and QBO_CLIENT_SECRET are set as Worker secrets by the GitHub Action (from the repo's secrets)
