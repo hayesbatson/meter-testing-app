@@ -235,6 +235,14 @@ textarea{resize:vertical;min-height:64px}
 .batchv .photogrid img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px;border:1px solid var(--line);max-width:100%}
 .batchv .photogrid figcaption{font-size:12px;margin-top:4px;line-height:1.4}
 .batchv .kbd{font-family:var(--f-mono);font-size:12px;padding:1px 6px;border:1px solid var(--line);border-radius:4px;background:var(--surface-2)}
+.fcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.fcard{border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface)}
+.fgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.fgrid input,.fgrid select{font-size:16px}
+@media (max-width:520px){.fgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.fcards{grid-template-columns:1fr}}
+.fieldrep table.hdr{width:100%;margin:12px 0}.fieldrep table.hdr td{padding:3px 0}
+.frtbl{width:100%;border-collapse:collapse;font-size:11px}.frtbl th,.frtbl td{border:1px solid #bbb;padding:4px 5px;vertical-align:top}.frtbl th{background:#eef1f3;text-align:left}
+@media print{.noprint,header,nav{display:none!important}}
 </style>
 
 <style>
@@ -349,6 +357,7 @@ function evalTests(m,which){
   });
 }
 function meterResult(m){
+  if(isStrap(m)){const ov=fieldOverall(m);return {before:[],after:null,final:[],overall:ov==="tested"?"incomplete":ov,usedAfter:false,field:true}}
   const before=evalTests(m,"before");
   const after=m.calibrated?evalTests(m,"after"):null;
   const final=(after||before).filter(t=>!t.internal);
@@ -367,6 +376,7 @@ function route(){
   for(const p of ["job","meter","report","hist","email","cust","req"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
   if(h.startsWith("order-"))return{v:"job",id:h.slice(6)};
   if(h==="qbo"||h.startsWith("qbo-"))return{v:"qbo",id:h.slice(4)};
+  if(h.startsWith("fieldrep-"))return{v:"fieldrep",id:h.slice(9)};
   if(h.startsWith("bphone-"))return{v:"bphone",id:h.slice(7)};
   if(h.startsWith("batch-")){const [id,tab,n]=h.slice(6).split(".");return{v:"batch",id,tab:tab||"job",n}}
   if(h==="review"||h==="setup"||h==="perf"||h==="customers"||h==="addrimport"||h==="requests"||h==="reqnew")return{v:h};
@@ -382,7 +392,7 @@ function render(){
   const reviewN=[...S.meters.values()].filter(m=>m.status==="ready"||m.status==="question").length;
   const reqN=REQ.state==="ready"?reqSubmittedN():0;
   $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["requests","Requests"+(reqN?`<span class="count">${reqN}</span>`:"")],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["customers","Customers"],["perf","Performance"],["setup","Limits &amp; lists"]]
-    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email","batch"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v))||(h==="setup"&&r.v==="qbo"))?"on":""}">${t}</a>`).join("");
+    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email","batch","fieldrep"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v))||(h==="setup"&&r.v==="qbo"))?"on":""}">${t}</a>`).join("");
   $("#mode").innerHTML=account&&mode!=="signin"?`${esc(account.name||account.username||"")} · <a href="#" data-act="signout">Sign out</a>`:"";
   $("#nav").hidden=mode!=="ready";
   const app=$("#app");
@@ -397,6 +407,7 @@ function render(){
   else if(r.v==="review")app.innerHTML=viewReview();
   else if(r.v==="setup")app.innerHTML=viewSetup();
   else if(r.v==="qbo")app.innerHTML=viewQbo();
+  else if(r.v==="fieldrep")app.innerHTML=viewFieldReport(r.id);
   else if(r.v==="bphone")app.innerHTML=window.BATCH?BATCH.phoneView(r.id):`<div class="empty">Loading…</div>`;
   else if(r.v==="batch")app.innerHTML=window.BATCH?BATCH.view(r.id,r.tab,r.n):`<div class="empty">Loading…</div>`;
   else if(r.v==="perf")app.innerHTML=viewPerf();
@@ -489,6 +500,7 @@ function viewJob(id){
     <div><div class="crumb"><a href="#jobs">Jobs &amp; meters</a></div>
     <div class="row spread"><h1>${esc(o.client)} · ${esc(jobName(o))} ${jsChip(o)}</h1>
       <div class="row"><button class="btn primary" data-act="add-meter" data-id="${id}">Add meter</button></div></div></div>
+    ${fieldPanel(o,ms)}
     <div class="meterlayout"><div class="stack"><div class="panel"><div class="bd grid g3">${jobFields(o,"o",true)}</div>${datalists()}</div>${contactPanel(o)}</div><aside class="stack">${notesPanel(o)}${timePanel(o,false)}${emailPanel(o)}</aside></div>
     <div class="panel"><div class="hd"><h2>Meters <span class="muted" style="font-weight:600">(${ms.length})</span></h2>
       <div class="row"><span class="note">${selN?`${selN} selected`:"Exports include all meters unless you tick some"}</span>
@@ -547,6 +559,7 @@ function viewMeter(id){
       <label class="f">After testing<select id="f-disposition" data-f="disposition"><option value="" ${!m.disposition?"selected":""}>Same as job (${DISP_SHORT[(o.disposition||"return")]})</option>${["return","scrap"].map(k=>`<option value="${k}" ${m.disposition===k?"selected":""}>${DISP_SHORT[k]}</option>`).join("")}</select></label>
       <div class="f" style="display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted)">Tested in<div class="seg" role="group" aria-label="Tested in">${["Shop","Field"].map(x=>`<button type="button" data-act="setting" data-v="${x}" class="${(m.setting||"Shop")===x?"on":""}">${x}</button>`).join("")}</div></div>
       ${inp("dateIn","Date in",{type:"date"})}${inp("dateOut","Date out",{type:"date"})}</div>
+    ${m.setting==="Field"?`<div class="row"><span class="note">Field test method</span><div class="seg" role="group" aria-label="Field test method"><button type="button" data-act="fmethod" data-v="strap" class="${m.fieldMethod==="strap"?"on":""}">Strap-on comparison</button><button type="button" data-act="fmethod" data-v="rig" class="${m.fieldMethod!=="strap"?"on":""}">Test rig (3-point)</button></div></div>`:""}
     ${dupWo?'<div class="callout warn">Another meter already has this work order number.</div>':""}
     <h3 class="sec">Test information</h3>
     <div class="grid g3">${inp("testDate","Test date",{type:"date"})}${inp("tech","Tested by",{list:"techs"})}</div>
@@ -559,6 +572,7 @@ function viewMeter(id){
     <h3 class="sec">Register readings</h3>
     <div class="grid g4">${inp("reads.begin","Beginning",{num:true})}${inp("reads.end","Ending",{num:true})}</div>
     ${m.type==="Compound"?`<div class="note">Dual register (compound meters only)</div><div class="grid g4">${inp("reads.lowBegin","Low side beginning",{num:true})}${inp("reads.lowEnd","Low side ending",{num:true})}${inp("reads.highBegin","High side beginning",{num:true})}${inp("reads.highEnd","High side ending",{num:true})}</div>`:""}
+    ${isStrap(m)?fieldHTML(m,o):""}<div ${isStrap(m)?"hidden":""}>
     <div class="row spread sec"><h3>Test results${m.calibrated?" · before calibration":""}</h3>
       <div class="row"><div class="seg" role="group" aria-label="Test setup"><button type="button" data-act="mode" data-v="std" class="${!m.custom?"on":""}">Standard 3-point</button><button type="button" data-act="mode" data-v="custom" class="${m.custom?"on":""}">Custom</button></div>
       ${m.type==="Compound"&&!m.pctDirect?`<label class="toggle"><input type="checkbox" id="f-dual" data-f="dual" data-rerender ${m.dual?"checked":""}>Dual registers (low and high side)</label>`:""}
@@ -569,6 +583,7 @@ function viewMeter(id){
     ${volLink}
     <label class="toggle"><input type="checkbox" id="f-cal" data-f="calibrated" data-rerender ${m.calibrated?"checked":""}>Meter was calibrated and retested</label>
     ${m.calibrated?`<div class="note">Overall result uses the after-calibration tests. Every test must pass. Leave the before results blank if the meter wasn't tested before cleaning or calibration.</div><h3>After calibration</h3><div class="tablewrap"><table class="tests${!m.pctDirect&&(isDual(m)||rigMode(m))?" wide":""}"><thead>${testHead}</thead><tbody>${testRows("after")}</tbody></table></div>${volLink}`:""}
+    </div>
     <h3 class="sec">4-20 <span style="text-transform:none">mA</span> output</h3>
     <div id="ma-box">${maHTML(m)}</div>
     <h3 class="sec">Work needed <span class="note" style="text-transform:none;letter-spacing:0;font-weight:500">For the QuickBooks estimate · not on the client report</span></h3>
@@ -670,6 +685,7 @@ async function printPdf(list){
 }
 function updateLive(){
   if(!editing)return;const m=editing.draft;const r=meterResult(m);
+  {const el=document.getElementById("fld-acc");if(el)el.textContent=fieldAccTxt(m)||"—"}
   document.querySelectorAll("[data-maexp]").forEach(el=>{const p=(m.ma.points||[])[+el.dataset.maexp];el.value=p?f2c(maExpected(p.gpm,m.ma.span)):""});
   ["before","after"].forEach(w=>evalTests(m,w).forEach((t,i)=>{
     const c=document.querySelector(`[data-res="${w}-${i}"]`);if(c)c.innerHTML=t.pass===null?'<span class="chip none">—</span>':chip(t.pass?"pass":"fail");
@@ -1038,6 +1054,7 @@ document.addEventListener("click",async e=>{
     if(act==="track-copy"){copyText(a.dataset.t).then(ok=>{if(ok)toast("Tracking number copied. Paste it on the carrier's page.")});return}
     if(act&&act.startsWith("req-")&&await reqAction(act,a))return;
     if(act&&act.startsWith("qb-")&&await qbAction(act,a))return;
+    if(act&&(act==="fmethod"||act.startsWith("fld-"))&&await fieldAction(act,a))return;
     if(act==="addr-setup"){a.disabled=true;a.textContent="Setting up…";
       try{const n=await setupAddresses();toast(`Address book ready: ${ADDR.list.length.toLocaleString()} addresses`)}catch(err){toast("Couldn't set up the address book: "+err.message);ADDR.state=Store.hasList("addresses")?"ready":"missing"}render();return}
     if(act==="exp-ups"||act==="exp-fedex"){exportCarrier(act==="exp-ups"?"UPS":"FedEx");return}
@@ -1115,7 +1132,7 @@ document.addEventListener("click",async e=>{
       editing.dirty=true;setSaveState("Saving…");await flushSave();if(editing&&editing.dirty)return;toast("Saved");go("job-"+oid)}
     else if(act==="next-meter"){const oid=editing.draft.orderId;if(editing.isNew&&!editing.touched){toast("This meter is still blank. Enter it first.");return}await flushSave();if(editing&&editing.dirty)return;createMeter(oid)}
     else if(act==="report"){if(editing.isNew&&!editing.touched){toast("Enter the meter details first.");return}await flushSave();S.meters.set(editing.id,clone(editing.draft));go("report-"+editing.id)}
-    else if(act==="setting"){editing.draft.setting=a.dataset.v;scheduleSave();a.parentNode.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b===a))}
+    else if(act==="setting"){editing.draft.setting=a.dataset.v;if(a.dataset.v==="Field"&&!editing.draft.fieldMethod)editing.draft.fieldMethod="strap";editing.touched=true;scheduleSave();render()}
     else if(["time-start","time-stop","time-del","time-add"].includes(act))timeAction(act,a);
     else if(act==="time-csv")timeCsv();
     else if(act==="print-cur"){if(editing.isNew&&!editing.touched){toast("Enter the meter details first.");return}await flushSave();const m=clone(editing.draft);S.meters.set(editing.id,m);await printPdf([m])}
@@ -1216,6 +1233,9 @@ document.addEventListener("change",async e=>{
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
   if(t.id==="req-filter"){reqFilter=t.value;render();return}
+  if(t.dataset&&t.dataset.fq){const [mid,path]=t.dataset.fq.split("|");const m=S.meters.get(mid);if(!m)return;const n=clone(m);setPath(n,path,t.value);if(path.startsWith("fld.")||path.startsWith("reads."))n.status=n.status||"in_progress";
+    try{await put("meters",mid,n);const el=document.querySelector(`[data-facc="${mid}"]`);if(el)el.textContent=fieldAccTxt(n)||"—";if(path==="fld.cant")render()}catch(err){toast("Couldn't save: "+err.message)}return}
+  if(t.dataset&&t.dataset.fo){const [oid,path]=t.dataset.fo.split("|");const o=S.orders.get(oid);if(!o)return;const n=clone(o);setPath(n,path,t.value.trim());try{await put("orders",oid,n);toast("Saved")}catch(err){toast("Couldn't save: "+err.message)}return}
   if(t.dataset&&t.dataset.qbrule){const [i,f]=t.dataset.qbrule.split("|");const r=qbCfg().rules[+i];if(r){r[f]=t.value;try{await saveQbCfg()}catch(err){toast("Couldn't save: "+err.message)}}return}
   if(t.dataset&&t.dataset.qbmap!==undefined){const c=qbCfg();if(t.value)c.map[t.dataset.qbmap]=t.value;else delete c.map[t.dataset.qbmap];try{await saveQbCfg();toast(t.value?`“${t.dataset.qbmap}” → ${qbItemName(t.value)}`:"Link removed")}catch(err){toast("Couldn't save: "+err.message)}render();return}
   if(t.id==="rq-customer"&&reqDraft){reqDraft.customer=t.value;const pf=reqPrefillFromCustomer(t.value);["contact","email","phone"].forEach(k=>{if(!reqDraft[k]&&pf[k]){reqDraft[k]=pf[k];const el=$("#rq-"+k);if(el)el.value=pf[k]}});
@@ -1248,7 +1268,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.14.7";
+const APP_VERSION="1.15.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1834,6 +1854,68 @@ async function qbAction(act,a){
     S.lists={...S.lists,parts:use};try{await putConfig("lists",{lists:S.lists});toast(`Parts list now has ${use.length} QuickBooks items`)}catch(e){toast("Couldn't save: "+e.message)}render();return true}
   if(act==="qb-customers"){a.disabled=true;a.textContent="Updating…";try{const n=await syncQbCustomers(false);toast(`${n.toLocaleString()} customer${n===1?"":"s"} updated from QuickBooks`)}catch(e){toast("Couldn't update customers: "+e.message)}render();return true}
   if(act==="qb-est"){const o=S.orders.get(a.dataset.id);if(o)await qbSendEstimate(o,a);return true}
+  return false}
+/* ---------- field testing: strap-on ultrasonic comparison (Burnsville / Blaine style) ---------- */
+const isStrap=m=>!!m&&m.setting==="Field"&&m.fieldMethod==="strap";
+const FIELD_CANT=["Not enough room to strap","Not enough straight pipe","Rollover error","Display broken","Meter not running / no flow","Meter inaccessible","Other (see notes)"];
+function fieldAcc(m){const f=m.fld||{};const mam=num(f.mamFlow),lo=num(f.custFlow),hi=num(f.custFlowHi);if(!mam||lo==null)return null;
+  const a=lo/mam,b=f.range&&hi!=null?hi/mam:null;return b==null?{lo:a,hi:a}:{lo:Math.min(a,b),hi:Math.max(a,b)}}
+const fieldAccTxt=m=>{const a=fieldAcc(m);if(!a)return "";const p=x=>(x*100).toFixed(1);return a.lo===a.hi?p(a.lo)+"%":`${p(a.lo)} – ${p(a.hi)}%`};
+function fieldOverall(m){const f=m.fld||{};if(f.cant)return "incomplete";const a=fieldAcc(m);if(!a)return "incomplete";const o=S.orders.get(m.orderId)||{},t=o.fieldTol||{};
+  const lo=num(t.low),hi=num(t.high);if(lo==null||hi==null)return "tested";return a.lo*100>=lo&&a.hi*100<=hi?"pass":"fail"}
+function fieldHTML(m,o){m.fld=m.fld||{};const f=m.fld;const inpF=(k,label,extra="")=>`<label class="f">${label}<input id="f-fld-${k}" data-f="fld.${k}" class="num" inputmode="decimal" value="${esc(f[k]??"")}" ${extra}></label>`;
+  const t=o.fieldTol||{};
+  return `<h3 class="sec">Field test · strap-on comparison</h3>
+    <div class="grid g3">${inpF("mamFlow","Our average flow (GPM)")}${inpF("custFlow",f.range?"Customer meter flow, low (GPM)":"Customer meter average flow (GPM)")}${f.range?inpF("custFlowHi","Customer meter flow, high (GPM)"):""}
+      <div class="f"><span style="font-size:12px;font-weight:600;color:var(--muted)">Meter accuracy</span><b id="fld-acc" style="font-size:24px;font-family:var(--f-display)">${esc(fieldAccTxt(m))||"—"}</b>${num(t.low)!=null&&num(t.high)!=null?`<span class="note">Pass range ${esc(t.low)}–${esc(t.high)}% (set on the job)</span>`:`<span class="note">Accuracy = customer meter flow ÷ our flow</span>`}</div></div>
+    <label class="toggle"><input type="checkbox" id="f-fld-range" data-f="fld.range" data-rerender ${f.range?"checked":""}>Customer meter's flow kept changing (enter its low and high)</label>
+    <div class="grid g2"><label class="f">Couldn't test?<select id="f-fld-cant" data-f="fld.cant" data-rerender><option value="">Tested</option>${FIELD_CANT.map(x=>`<option ${f.cant===x?"selected":""}>${esc(x)}</option>`).join("")}</select></label>
+      <label class="f">Tech notes (on the report)<textarea id="f-fld-notes" data-f="fld.notes" rows="2">${esc(f.notes||"")}</textarea></label></div>`}
+/* job page: phone-friendly site list for strap-on meters, report and carry-forward */
+function fieldPanel(o,ms){const fm=ms.filter(isStrap);const any=ms.some(m=>m.setting==="Field")||o.fieldJob;
+  if(!any&&!fm.length)return ms.length?"":`<div class="panel"><div class="bd row spread"><span class="note">Testing meters on site with the strap-on tester?</span><button class="btn small" data-act="fld-start" data-id="${o.id}">Set up as a field job</button></div></div>`;const t=o.fieldTol||{};
+  const earlier=[...S.orders.values()].filter(x=>x.id!==o.id&&x.client===o.client&&metersOf(x.id).some(isStrap)).sort((a,b)=>(b.received||"").localeCompare(a.received||""));
+  const card=m=>{const f=m.fld||{};const q=k=>`data-fq="${m.id}|${k}"`;const v=k=>esc(getPath(m,k)??"");
+    return `<div class="fcard"><div class="row spread"><b class="mono">${esc(m.serial)||"no serial"}</b><span class="note">WO ${esc(m.wo)} · ${esc([m.size,m.type&&tl(m.type),m.mfr].filter(Boolean).join(" "))}</span></div>
+      <div class="fgrid"><label class="f">Location<input ${q("location")} value="${v("location")}"></label>
+        <label class="f">Start read<input ${q("reads.begin")} inputmode="decimal" value="${v("reads.begin")}"></label><label class="f">End read<input ${q("reads.end")} inputmode="decimal" value="${v("reads.end")}"></label>
+        <label class="f">Our flow (GPM)<input ${q("fld.mamFlow")} inputmode="decimal" value="${v("fld.mamFlow")}"></label><label class="f">${f.range?"Customer low":"Customer flow"}<input ${q("fld.custFlow")} inputmode="decimal" value="${v("fld.custFlow")}"></label>
+        ${f.range?`<label class="f">Customer high<input ${q("fld.custFlowHi")} inputmode="decimal" value="${v("fld.custFlowHi")}"></label>`:""}
+        <div class="f"><span class="note">Accuracy</span><b data-facc="${m.id}">${esc(fieldAccTxt(m))||"—"}</b></div></div>
+      <div class="fgrid"><label class="f">Couldn't test?<select ${q("fld.cant")}><option value="">Tested</option>${FIELD_CANT.map(x=>`<option ${f.cant===x?"selected":""}>${esc(x)}</option>`).join("")}</select></label>
+        <label class="f" style="grid-column:span 2">Tech notes<input ${q("fld.notes")} value="${v("fld.notes")}"></label></div>
+      <div class="row"><button class="btn small" data-go="meter-${m.id}">Photos and details</button>${chip(fieldOverall(m)==="tested"?"":fieldOverall(m))}</div></div>`};
+  return `<div class="panel"><div class="hd"><h2>Field testing</h2><div class="row"><button class="btn small primary" data-act="fld-add" data-id="${o.id}">Add field meter</button><button class="btn small" data-go="fieldrep-${o.id}">Field results report</button></div></div><div class="bd stack">
+    <div class="grid g3"><label class="f">Project (on the report)<input data-fo="${o.id}|fieldProject" value="${esc(o.fieldProject||"")}" placeholder="e.g. Well Meter and Treatment Plant Testing"></label>
+      <label class="f">Pass range low % (optional)<input data-fo="${o.id}|fieldTol.low" inputmode="decimal" value="${esc(t.low||"")}" placeholder="e.g. 95"></label><label class="f">Pass range high % (optional)<input data-fo="${o.id}|fieldTol.high" inputmode="decimal" value="${esc(t.high||"")}" placeholder="e.g. 105"></label></div>
+    <div class="note">Leave the pass range blank to report accuracy only. Entries here save as you go; open a meter for photos, Work needed and the full record.</div>
+    ${fm.length?`<div class="fcards">${fm.map(card).join("")}</div>`:`<div class="note">No strap-on meters yet. Choose <b>Add field meter</b>${earlier.length?" or copy last time's meter list":""}.</div>`}
+    ${earlier.length?`<div class="row"><span class="note">Copy the meter list (serial, size, type, make, location) from an earlier ${esc(o.client)} job:</span>${earlier.slice(0,3).map(x=>`<button class="btn small" data-act="fld-copy" data-id="${o.id}" data-from="${x.id}">${esc(jobName(x))} · ${esc(fmtDate(x.received))} (${metersOf(x.id).filter(isStrap).length})</button>`).join("")}</div>`:""}
+  </div></div>`}
+function viewFieldReport(id){const o=S.orders.get(id);if(!o)return `<div class="empty">Job not found.</div>`;const ms=metersOf(id).filter(isStrap).sort((a,b)=>String(a.wo).localeCompare(String(b.wo),undefined,{numeric:true}));
+  const tol=num((o.fieldTol||{}).low)!=null&&num((o.fieldTol||{}).high)!=null;const dates=ms.map(m=>m.testDate).filter(Boolean).sort();
+  const rows=ms.map(m=>{const f=m.fld||{};const flowTxt=f.range&&f.custFlowHi?`${f.custFlow} – ${f.custFlowHi}`:(f.custFlow||"");const r=fieldOverall(m);
+    return `<tr><td>${esc(m.serial)}</td><td>${esc(m.size)}</td><td>${esc(tl(m.type)||"")}</td><td>${esc(m.mfr)}</td><td>${esc(m.location)}</td><td class="num">${esc(f.cant?"N/A":getPath(m,"reads.begin")||"")}</td><td class="num">${esc(f.cant?"N/A":getPath(m,"reads.end")||"")}</td><td class="num">${esc(f.cant?"":f.mamFlow||"")}</td><td class="num">${esc(f.cant?"":flowTxt)}</td><td class="num"><b>${esc(f.cant?"N/A":fieldAccTxt(m))}</b>${tol&&!f.cant&&r!=="incomplete"?` ${r==="pass"?"Pass":"Fail"}`:""}</td><td>${esc([f.cant,f.notes].filter(Boolean).join(" – "))}</td></tr>`}).join("");
+  return `<div class="stack"><div class="row spread noprint"><div class="crumb"><a href="#job-${id}">${esc(o.client)} · ${esc(jobName(o))}</a> › Field results report</div><div class="row"><button class="btn" data-act="fld-xlsx" data-id="${id}">Excel</button><button class="btn primary" data-act="fld-print">Print / Save as PDF</button></div></div>
+    <div class="paper fieldrep"><div class="row spread"><img src="${LOGO}" alt="Mid America Meter" style="height:54px"><div style="text-align:right"><b>Meter Testing Results</b></div></div>
+    <table class="hdr"><tr><td><b>Customer:</b> ${esc(o.client)}</td><td><b>Project Date:</b> ${esc(dates.length?(dates[0]===dates[dates.length-1]?fmtDate(dates[0]):fmtDate(dates[0])+" – "+fmtDate(dates[dates.length-1])):"")}</td></tr><tr><td colspan="2"><b>Project:</b> ${esc(o.fieldProject||"")}</td></tr></table>
+    <table class="frtbl"><thead><tr><th>Meter Serial Number</th><th>Meter Size</th><th>Meter Type</th><th>Meter Manufacturer</th><th>Meter Location</th><th>Starting Reading</th><th>Ending Reading</th><th>Mid America Average Flow (GPM)</th><th>Customer Average Flow (GPM)</th><th>Meter Accuracy (%)</th><th>Tech Notes</th></tr></thead><tbody>${rows||`<tr><td colspan="11">No strap-on meters on this job yet.</td></tr>`}</tbody></table>
+    ${tol?`<div class="note">Pass range ${esc(o.fieldTol.low)}–${esc(o.fieldTol.high)}%.</div>`:""}<div class="note">Accuracy = customer meter flow ÷ Mid America Meter's measured flow (strap-on ultrasonic).</div></div></div>`}
+function fieldXlsx(id){const o=S.orders.get(id);const ms=metersOf(id).filter(isStrap).sort((a,b)=>String(a.wo).localeCompare(String(b.wo),undefined,{numeric:true}));if(!window.XLSX){toast("The Excel tool didn't load. Reload and try again.");return}
+  const aoa=[["Mid America Meter","","","","Meter Testing Results"],["Customer:",o.client,"","Project Date:",ms.map(m=>m.testDate).filter(Boolean).sort()[0]||""],["Project:",o.fieldProject||""],[],
+    ["Meter Serial Number","Meter Size","Meter Type","Meter Manufacturer","Meter Location","Starting Reading","Ending Reading","Mid America Average Flow (GPM)","Customer Average Flow (GPM)","Meter Accuracy (%)","Tech Notes"],
+    ...ms.map(m=>{const f=m.fld||{};const a=fieldAcc(m);return [m.serial,m.size,tl(m.type)||"",m.mfr,m.location,f.cant?"N/A":getPath(m,"reads.begin")||"",f.cant?"N/A":getPath(m,"reads.end")||"",f.cant?"":num(f.mamFlow)??"",f.cant?"":(f.range&&f.custFlowHi?`${f.custFlow} - ${f.custFlowHi}`:num(f.custFlow)??""),f.cant||!a?"N/A":(a.lo===a.hi?a.lo:fieldAccTxt(m)),[f.cant,f.notes].filter(Boolean).join(" – ")]})];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);for(let r=5;r<aoa.length;r++){const c=ws[XLSX.utils.encode_cell({r,c:9})];if(c&&c.t==="n")c.z="0.0%";const s=ws[XLSX.utils.encode_cell({r,c:0})];if(s){s.t="s";s.v=String(aoa[r][0]||"")}}
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Meter Testing Results");XLSX.writeFile(wb,`${safeName(o.client)} field testing results.xlsx`)}
+async function fieldAction(act,a){
+  if(act==="fmethod"){editing.draft.fieldMethod=a.dataset.v;editing.touched=true;scheduleSave();render();return true}
+  if(act==="fld-start"){const o=S.orders.get(a.dataset.id);if(!o)return true;try{await put("orders",o.id,{...o,fieldJob:true})}catch(e){toast("Couldn't save: "+e.message)}render();return true}
+  if(act==="fld-print"){window.print();return true}
+  if(act==="fld-xlsx"){fieldXlsx(a.dataset.id);return true}
+  if(act==="fld-add"){const oid=a.dataset.id;await createMeter(oid);if(editing){editing.draft.setting="Field";editing.draft.fieldMethod="strap";editing.draft.fld={};render()}return true}
+  if(act==="fld-copy"){if(!confirmClick(a,"Click again to copy the meter list"))return true;const src=metersOf(a.dataset.from).filter(isStrap);a.disabled=true;let n=0;
+    try{for(const m of src){await createRec("meters",{orderId:a.dataset.id,wo:nextWo(),serial:m.serial,size:m.size,type:m.type,mfr:m.mfr,model:m.model,registration:m.registration,location:m.location,setting:"Field",fieldMethod:"strap",fld:{},reads:{},status:"in_progress",testDate:today(),dateIn:today(),tech:S.myTech||""});n++}
+      toast(`${n} meters copied. Enter this visit's readings in the list.`)}catch(e){toast(`Copied ${n}; then stopped: ${e.message}`)}render();return true}
   return false}
 /* ---------- shipping ---------- */
 const DEFAULT_CARRIERS=[
