@@ -1172,7 +1172,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.12.2";
+const APP_VERSION="1.12.3";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1644,7 +1644,7 @@ function qbEstimateBox(o,ms){if(!qbOn())return "";const q=o.qbo;const {lines,mis
     <button class="btn small ${q&&!changed?"":"primary"}" data-act="qb-est" data-id="${o.id}" ${missing.length||!lines.length?"disabled":""}>${q?"Update estimate in QuickBooks":"Create estimate in QuickBooks"}</button></div>
     ${q?`<div class="note">${q.updatedAt?"Updated":"Created"} ${fmtDay(q.updatedAt||q.sentAt)} ${fmtTime(q.updatedAt||q.sentAt)} by ${esc(q.by||"")} · ${q.lines} line${q.lines===1?"":"s"}. Open it in QuickBooks to review prices and send it to the customer.</div>`:`<div class="note">Sends ${lines.length} line${lines.length===1?"":"s"} (one per work item or part, per meter, each starting with the WO and serial) to a new estimate for ${esc(o.client)}. Prices come from QuickBooks.</div>`}
     ${missing.length?`<div class="callout warn">Not linked to a QuickBooks item yet: ${esc(missing.join(", "))}. Link them on the <a href="#qbo">QuickBooks page</a>.</div>`:""}
-    ${o.client&&QBO.state==="ready"&&!qboFor(o.client)?`<div class="callout warn">“${esc(o.client)}” isn't a QuickBooks customer name, so the estimate can't be created. Pick the client from the QuickBooks list.</div>`:""}</div>`}
+    ${o.client&&qbCfg().env==="production"&&QBO.state==="ready"&&!qboFor(o.client)?`<div class="callout warn">“${esc(o.client)}” isn't a QuickBooks customer name, so the estimate can't be created. Pick the client from the QuickBooks list.</div>`:""}</div>`}
 async function qbSendEstimate(o,a){const ms=metersOf(o.id);const {lines,missing}=qbLines(o,ms);if(missing.length||!lines.length)return;
   const q=o.qbo;const by=S.myTech||(account&&account.name)||userName();
   a.disabled=true;const label=a.textContent;a.textContent="Sending…";
