@@ -170,6 +170,71 @@ textarea{resize:vertical;min-height:64px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 .linkbtn{font:inherit;font-size:13px;font-weight:600;color:var(--info);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline}
 .phlabel{width:100%;min-width:0;margin-top:4px;padding:4px 6px;font-size:12px}
+/* batch screens (batch.js) */
+.batchv .runset{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.batchv .runset .wide{grid-column:span 2}
+.batchv .trio{display:grid;grid-template-columns:auto repeat(3,minmax(0,1fr));gap:6px 8px;align-items:center;font-size:13px}
+.batchv .trio .h{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.batchv .trio input{padding:6px 8px;font-size:14px}
+.batchv table.bench{border-collapse:collapse;font-size:14px;width:100%}
+.batchv table.bench th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;padding:6px 5px;text-align:left;background:var(--surface-2);border-bottom:1px solid var(--line);white-space:nowrap}
+.batchv table.bench th.grp{text-align:center;border-left:1px solid var(--line)}
+.batchv table.bench td{padding:5px;border-bottom:1px solid var(--line);vertical-align:top}
+.batchv table.bench td.gl{border-left:1px solid var(--line)}
+.batchv table.bench input{padding:6px 7px;font-size:14px;font-family:var(--f-mono);min-width:96px}
+.batchv table.bench input.ser{min-width:120px}
+.batchv table.bench tr.nct td{background:var(--surface-2)}
+.batchv table.bench tr.nct input{opacity:.5}
+.batchv .pos{font-family:var(--f-display);font-weight:700;font-size:20px;width:34px;text-align:center;padding-top:6px!important}
+.batchv .acc{font-family:var(--f-mono);font-size:13px;display:block;margin-top:3px;min-height:18px}
+.batchv .acc.pass{color:var(--pass)}
+.batchv .acc.fail{color:var(--fail);font-weight:600}
+.batchv .flag{display:block;font-size:12px;margin-top:3px;font-weight:600;white-space:normal;max-width:180px}
+.batchv .flag.ok{color:var(--pass)}
+.batchv .flag.warn{color:var(--warn)}
+.batchv .flag.bad{color:var(--fail)}
+.batchv .flag.info{color:var(--muted);font-weight:500}
+.batchv .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.batchv .stat{padding:12px 14px;border-radius:8px;background:var(--surface-2)}
+.batchv .stat b{display:block;font-family:var(--f-display);font-size:28px;line-height:1.1}
+.batchv .stat span{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.batchv .stat.pass b{color:var(--pass)}
+.batchv .stat.fail b{color:var(--fail)}
+.batchv .stat.warn b{color:var(--warn)}
+.batchv .bar{height:10px;border-radius:6px;background:var(--surface-2);overflow:hidden;display:flex}
+.batchv .bar i{display:block;height:100%}
+.batchv .bar .p{background:var(--pass)}
+.batchv .bar .f{background:var(--fail)}
+.batchv .bar .n{background:var(--muted)}
+.batchv .opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.batchv .filetbl td,.batchv .filetbl th{font-size:12px!important;padding:5px 8px!important}
+.batchv details summary{cursor:pointer;font-weight:600}
+.batchv .sergrid{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.batchv .sergrid span{font-family:var(--f-mono);font-size:12px;padding:2px 7px;border-radius:5px;background:var(--surface-2)}
+.batchv .runhd{cursor:pointer}
+.batchv table.bench input.bad{border-color:var(--fail);outline:1px solid var(--fail)}
+.batchv table.list input.hand,.batchv table.bench input.hand{border-color:var(--warn);background:var(--warn-bg)}
+.batchv table.bench input::placeholder{color:var(--muted);opacity:.8}
+.batchv table.bench input:disabled{background:var(--surface-2);color:var(--ink)}
+.batchv table.bench select{padding:6px 7px;font-size:14px;min-width:110px}
+.batchv .runnav{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.batchv .tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.batchv .btn.on{background:var(--accent-soft);border-color:var(--accent)}
+.batchv .log{font-size:13px;color:var(--muted);margin:0;padding-left:18px}
+.batchv .linkbtn{font:inherit;font-size:12px;font-weight:600;color:var(--info);background:none;border:0;padding:0;margin-left:4px;cursor:pointer;text-decoration:underline}
+.batchv .subtabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-top:14px}
+.batchv .subtabs a{padding:8px 14px;color:var(--muted);text-decoration:none;font-weight:600;font-size:14px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.batchv .subtabs a:hover{color:var(--ink)}
+.batchv .subtabs a.on{color:var(--ink);border-bottom-color:var(--accent)}
+.batchv .seg{display:inline-flex;gap:4px;flex-wrap:wrap}
+.batchv .thumb{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
+.batchv .photorow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.batchv .btn.warnbtn{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
+.batchv .photogrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.batchv .photogrid figure{margin:0}
+.batchv .photogrid img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px;border:1px solid var(--line);max-width:100%}
+.batchv .photogrid figcaption{font-size:12px;margin-top:4px;line-height:1.4}
+.batchv .kbd{font-family:var(--f-mono);font-size:12px;padding:1px 6px;border:1px solid var(--line);border-radius:4px;background:var(--surface-2)}
 </style>
 
 <style>
@@ -302,6 +367,8 @@ function route(){
   for(const p of ["job","meter","report","hist","email","cust","req"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
   if(h.startsWith("order-"))return{v:"job",id:h.slice(6)};
   if(h==="qbo"||h.startsWith("qbo-"))return{v:"qbo",id:h.slice(4)};
+  if(h.startsWith("bphone-"))return{v:"bphone",id:h.slice(7)};
+  if(h.startsWith("batch-")){const [id,tab,n]=h.slice(6).split(".");return{v:"batch",id,tab:tab||"job",n}}
   if(h==="review"||h==="setup"||h==="perf"||h==="customers"||h==="addrimport"||h==="requests"||h==="reqnew")return{v:h};
   return{v:"jobs"};
 }
@@ -315,7 +382,7 @@ function render(){
   const reviewN=[...S.meters.values()].filter(m=>m.status==="ready"||m.status==="question").length;
   const reqN=REQ.state==="ready"?reqSubmittedN():0;
   $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["requests","Requests"+(reqN?`<span class="count">${reqN}</span>`:"")],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["customers","Customers"],["perf","Performance"],["setup","Limits &amp; lists"]]
-    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v))||(h==="setup"&&r.v==="qbo"))?"on":""}">${t}</a>`).join("");
+    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email","batch"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v))||(h==="setup"&&r.v==="qbo"))?"on":""}">${t}</a>`).join("");
   $("#mode").innerHTML=account&&mode!=="signin"?`${esc(account.name||account.username||"")} · <a href="#" data-act="signout">Sign out</a>`:"";
   $("#nav").hidden=mode!=="ready";
   const app=$("#app");
@@ -330,6 +397,8 @@ function render(){
   else if(r.v==="review")app.innerHTML=viewReview();
   else if(r.v==="setup")app.innerHTML=viewSetup();
   else if(r.v==="qbo")app.innerHTML=viewQbo();
+  else if(r.v==="bphone")app.innerHTML=window.BATCH?BATCH.phoneView(r.id):`<div class="empty">Loading…</div>`;
+  else if(r.v==="batch")app.innerHTML=window.BATCH?BATCH.view(r.id,r.tab,r.n):`<div class="empty">Loading…</div>`;
   else if(r.v==="perf")app.innerHTML=viewPerf();
   else if(r.v==="customers")app.innerHTML=viewCustomers();
   else if(r.v==="requests")app.innerHTML=viewRequests();
@@ -348,7 +417,7 @@ function userBusy(){
 function softRender(){const r=route();if(r.v==="meter"&&editing&&editing.id===r.id)return;if(userBusy()){renderPending=true;return}render()}
 document.addEventListener("focusout",()=>setTimeout(()=>{if(renderPending&&!userBusy()){renderPending=false;softRender()}},800));
 function metersOf(oid){return [...S.meters.values()].filter(m=>m.orderId===oid).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0))}
-function nextWo(){let mx=Math.max(num(S.settings.woFloor)||0,HIST.woMax||0);S.meters.forEach(m=>{const n=num(m.wo);if(n!==null&&n>mx&&n<1e9)mx=n});return mx?String(mx+1):""}
+function nextWo(){let mx=Math.max(num(S.settings.woFloor)||0,HIST.woMax||0,num(S.settings.woReserved)||0);S.meters.forEach(m=>{const n=num(m.wo);if(n!==null&&n>mx&&n<1e9)mx=n});return mx?String(mx+1):""}
 function accList(m){const r=meterResult(m);return r.final.map(t=>t.pct===null?'<span class="muted">—</span>':`<span style="color:${t.pass===false?"var(--fail)":"inherit"}">${f2(t.pct)}</span>`).join(" · ")}
 
 /* ----- jobs list + search ----- */
@@ -371,7 +440,7 @@ function viewJobs(){
     const appr=ms.filter(m=>m.status==="approved").length;
     const wos=ms.map(m=>num(m.wo)).filter(n=>n!==null).sort((a,b)=>a-b);
     const nn=(o.notes||[]).length;const last=nn?[...o.notes].sort((a,b)=>b.at-a.at)[0]:null;
-    return `<tr class="click" data-go="job-${o.id}"><td><b>${esc(o.client)}</b>${nn?` <span class="jstat info" title="${esc(last.text)}">${nn} note${nn>1?"s":""}</span>`:""}</td><td>${jsChip(o)}</td><td class="mono">${esc(o.estimate)||'<span class="muted">—</span>'}</td><td class="mono">${esc(o.po)||'<span class="muted">—</span>'}</td><td>${APPROVAL[o.approval]||'<span class="muted">—</span>'}</td><td>${fmtDate(o.received)}</td>
+    return `<tr class="click" data-go="${o.batch?"batch-"+o.id+".job":"job-"+o.id}"><td><b>${esc(o.client)}</b>${o.batch?` <span class="jstat info">Batch · ${esc(o.batch.name||"")}</span><div class="note">${(o.batch.entered||0).toLocaleString()}${o.batch.manifestN?" of "+o.batch.manifestN.toLocaleString():""} entered · ${o.batch.pass||0} pass · ${o.batch.fail||0} fail${o.batch.look?` · <b>${o.batch.look} need a look</b>`:""}${o.batch.finish&&!o.batch.approved?" · likely done "+esc(o.batch.finish):""}</div>`:""}${nn?` <span class="jstat info" title="${esc(last.text)}">${nn} note${nn>1?"s":""}</span>`:""}</td><td>${jsChip(o)}</td><td class="mono">${esc(o.estimate)||'<span class="muted">—</span>'}</td><td class="mono">${esc(o.po)||'<span class="muted">—</span>'}</td><td>${APPROVAL[o.approval]||'<span class="muted">—</span>'}</td><td>${fmtDate(o.received)}</td>
       <td class="mono">${wos.length?(wos.length>1?`${wos[0]}–${wos[wos.length-1]}`:wos[0]):'<span class="muted">—</span>'}</td><td class="num">${ms.length}</td><td class="num">${p}</td><td class="num">${f?`<span style="color:var(--fail);font-weight:700">${f}</span>`:0}</td>
       <td>${ms.length?`${appr} of ${ms.length} approved`:'<span class="muted">No meters yet</span>'}</td></tr>`}).join("");
   return `<div class="stack">
@@ -400,12 +469,14 @@ function newJobForm(){
   const el=$("#newjob");el.hidden=false;
   el.innerHTML=`<div class="panel"><div class="bd stack"><h2>New job</h2>
     <div class="grid g3">${jobFields({received:today(),showPassFail:true},"nj",false)}</div>${datalists()}<div id="nj-hint"></div>
+    <div class="row" style="align-items:flex-end"><label class="toggle"><input type="checkbox" id="nj-batch"> Batch job (many small meters tested on the bench, with a client file)</label><label class="f" style="min-width:240px">Batch job name<input id="nj-bname" placeholder="e.g. Aqua Batch 4"></label></div>
     <div class="row"><button class="btn primary" data-act="create-job" data-meter="1">Create job and add first meter</button><button class="btn" data-act="create-job">Create job only</button><button class="btn" data-act="cancel-job">Cancel</button></div></div></div>`;
   $("#nj-client").focus();
 }
 
 /* ----- one job ----- */
 function viewJob(id){
+  {const bo=S.orders.get(id);if(bo&&bo.batch){setTimeout(()=>{location.replace("#batch-"+id+".job")},0);return `<div class="empty">Opening the batch job…</div>`}}
   const o=S.orders.get(id);if(!o)return notFound("job");
   const ms=metersOf(id);
   const rows=ms.map(m=>{const r=meterResult(normalize(clone(m)));
@@ -1031,9 +1102,10 @@ document.addEventListener("click",async e=>{
         else if(m.length&&!a.dataset.anyway){$("#nj-hint").innerHTML=clientHint(client)+`<div class="row"><button class="btn small" data-act="create-job" ${a.dataset.meter?'data-meter="1"':""} data-anyway="1">Create with “${esc(client)}” anyway</button></div>`;toast("Check the client name first.");return}}
       const st=$("#nj-status").value;
       const o={id:uid("o"),client,status:st,statusLog:[{status:st,at:Date.now(),by:userName()}],estimate:$("#nj-est").value.trim(),po:$("#nj-po").value.trim(),approval:$("#nj-appr").value,disposition:$("#nj-disp").value,received:$("#nj-rec").value,showPassFail:$("#nj-pf").value==="1",createdAt:Date.now()};
+      if($("#nj-batch")&&$("#nj-batch").checked){const bn=$("#nj-bname").value.trim();if(!bn){toast("Give the batch job a name, like Aqua Batch 4.");$("#nj-bname").focus();return}o.batch={name:bn,entered:0,pass:0,fail:0}}
       fillFromQbo(o,false);
       try{await createRec("orders",o)}catch(err){toast("Couldn't create the job: "+(err.message||err.code));return}
-      if(a.dataset.meter)await createMeter(o.id);else go("job-"+o.id);
+      if(o.batch)go("batch-"+o.id+".job");else if(a.dataset.meter)await createMeter(o.id);else go("job-"+o.id);
     }
     else if(act==="add-meter")createMeter(id);
     else if(act==="save-close"){const oid=editing.draft.orderId;
@@ -1174,7 +1246,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.13.3";
+const APP_VERSION="1.14.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1278,6 +1350,10 @@ const GraphStore={
     const r=await fetch(it["@microsoft.graph.downloadUrl"]);if(!r.ok)throw new Error("Couldn't download "+path);return r;
   },
   async fileUrl(itemId){const it=await gfetch(`/sites/${siteId}/drive/items/${itemId}`);return it["@microsoft.graph.downloadUrl"]},
+  async getJson(path){let it;try{it=await gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}?$select=id,eTag,@microsoft.graph.downloadUrl`)}catch(e){if(e.status===404)return {data:null,etag:null};throw e}
+    const r=await fetch(it["@microsoft.graph.downloadUrl"],{cache:"no-store"});if(!r.ok)throw new Error("Couldn't download "+path);return {data:await r.json(),etag:it.eTag}},
+  async putJsonIf(path,data,etag){const headers={"Content-Type":"application/json"};if(etag)headers["If-Match"]=etag;else headers["If-None-Match"]="*";
+    const it=await gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}:/content`,{method:"PUT",body:new Blob([JSON.stringify(data)],{type:"application/json"}),headers});return it&&it.eTag},
   async removeFile(itemId){await gfetch(`/sites/${siteId}/drive/items/${itemId}`,{method:"DELETE"})},
   async grantSite(appId){return gfetch(`/sites/${siteId}/permissions`,{method:"POST",scopes:[...SCOPES,"https://graph.microsoft.com/Sites.FullControl.All"],json:{roles:["write"],grantedToIdentities:[{application:{id:appId,displayName:"MTA Request Form"}}]}})},
   async renameFile(itemId,name){return gfetch(`/sites/${siteId}/drive/items/${itemId}`,{method:"PATCH",json:{name,"@microsoft.graph.conflictBehavior":"rename"}})},
@@ -1299,6 +1375,9 @@ const MockStore={
   sent:[],async sendMail(m){this.sent.push(m)},
   async putFile(path,blob){const id="f"+this.n++;this.files.set(path,{id,blob});this.files.set(id,{id,blob});return {id,webUrl:"#"}},
   async getFile(path){const f=this.files.get(path);if(!f){const e=new Error("Not found");e.status=404;throw e}return new Response(f.blob)},
+  async getJson(path){const f=this.files.get("json:"+path);return f?{data:JSON.parse(f.text),etag:f.etag}:{data:null,etag:null}},
+  async putJsonIf(path,data,etag){const f=this.files.get("json:"+path);if((f&&f.etag!==etag)||(!f&&etag)){const e=new Error("Changed by someone else");e.status=412;throw e}
+    const n={text:JSON.stringify(data),etag:"e"+(this.n++)};this.files.set("json:"+path,n);return n.etag},
   async fileUrl(itemId){const f=this.files.get(itemId);return f?URL.createObjectURL(f.blob):""},
   async removeFile(itemId){this.files.delete(itemId)},
   async renameFile(itemId,name){return {id:itemId,name}},
@@ -1315,6 +1394,11 @@ async function createRec(coll,data){
   const id=await Store.create(coll,data);data.id=id;S[coll].set(id,data);return id;
 }
 async function del(coll,id){await Store.remove(coll,id)}
+/* change a JSON file safely when several people may be saving it: apply fn to the latest copy, write only if nobody changed it meanwhile */
+async function updateJson(path,fn,init){
+  for(let i=0;i<6;i++){const {data,etag}=await Store.getJson(path);const next=fn(data==null?clone(init===undefined?{}:init):data);if(next===undefined)return data;
+    try{await Store.putJsonIf(path,next,etag);return next}catch(e){if(e.status!==412&&e.status!==409)throw e;await sleep(300+Math.random()*700)}}
+  throw new Error("Someone else kept saving at the same moment. Try again.")}
 async function putConfig(name,data){
   const rec={key:name,...data};const id=S.configIds[name];
   if(id)await Store.update("config",id,rec);else S.configIds[name]=await Store.create("config",rec);
@@ -1326,6 +1410,7 @@ async function loadAll(){
   config.forEach(c=>{S.configIds[c.key]=c.id;
     if(c.key==="limits"&&c.limits)S.limits=c.limits;
     if(c.key==="lists"&&c.lists)S.lists={...DEFAULT_LISTS,...c.lists};
+    if(c.key==="batchCust")S.batchCust=c.cust||{};
     if(c.key==="qbo")S.qbCfg={map:{},items:[],itemsAt:0,connected:false,...c};
     if(c.key==="settings")S.settings={...S.settings,...c,techLinks:c.techLinks||{}}});
   S.loadedO=S.loadedM=true;
@@ -2447,5 +2532,6 @@ window.addEventListener("hashchange",acHide);
 
 render();start();
 </script>
+<script>document.write('<script src="batch.js?v='+APP_VERSION+'"><\/script>')</script>
 </body>
 </html>
