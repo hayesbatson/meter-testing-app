@@ -480,6 +480,7 @@ function newJobForm(){
   const el=$("#newjob");el.hidden=false;
   el.innerHTML=`<div class="panel"><div class="bd stack"><h2>New job</h2>
     <div class="grid g3">${jobFields({received:today(),showPassFail:true},"nj",false)}</div>${datalists()}<div id="nj-hint"></div>
+    <div class="row"><label class="toggle"><input type="checkbox" id="nj-field"> Field job (testing meters on site with the strap-on tester)</label></div>
     <div class="row" style="align-items:flex-end"><label class="toggle"><input type="checkbox" id="nj-batch"> Batch job (many small meters tested on the bench, with a client file)</label><label class="f" style="min-width:240px">Batch job name<input id="nj-bname" placeholder="e.g. Aqua Batch 4"></label></div>
     <div class="row"><button class="btn primary" data-act="create-job" data-meter="1">Create job and add first meter</button><button class="btn" data-act="create-job">Create job only</button><button class="btn" data-act="cancel-job">Cancel</button></div></div></div>`;
   $("#nj-client").focus();
@@ -1121,6 +1122,7 @@ document.addEventListener("click",async e=>{
         else if(m.length&&!a.dataset.anyway){$("#nj-hint").innerHTML=clientHint(client)+`<div class="row"><button class="btn small" data-act="create-job" ${a.dataset.meter?'data-meter="1"':""} data-anyway="1">Create with “${esc(client)}” anyway</button></div>`;toast("Check the client name first.");return}}
       const st=$("#nj-status").value;
       const o={id:uid("o"),client,status:st,statusLog:[{status:st,at:Date.now(),by:userName()}],estimate:$("#nj-est").value.trim(),po:$("#nj-po").value.trim(),approval:$("#nj-appr").value,disposition:$("#nj-disp").value,received:$("#nj-rec").value,showPassFail:$("#nj-pf").value==="1",createdAt:Date.now()};
+      if($("#nj-field")&&$("#nj-field").checked){if($("#nj-batch").checked){toast("Choose either Field job or Batch job, not both.");return}o.fieldJob=true}
       if($("#nj-batch")&&$("#nj-batch").checked){const bn=$("#nj-bname").value.trim();if(!bn){toast("Give the batch job a name, like Aqua Batch 4.");$("#nj-bname").focus();return}o.batch={name:bn,entered:0,pass:0,fail:0}}
       fillFromQbo(o,false);
       try{await createRec("orders",o)}catch(err){toast("Couldn't create the job: "+(err.message||err.code));return}
@@ -1268,7 +1270,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.15.0";
+const APP_VERSION="1.15.1";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
