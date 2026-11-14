@@ -568,7 +568,8 @@ function maHTML(m){const a=m.ma;
 function maLines(m){const a=m.ma;if(!a||!a.on)return [];return (a.points||[]).filter(p=>num(p.found)!==null||num(p.cal)!==null).map(p=>{
   const t=v=>String(v==null?"":v).trim();const f=num(p.found)!==null,c=num(p.cal)!==null;return `@${t(p.gpm)}gpm: ${f?t(p.found)+"mA":""}${c?`${f?" ":""}(cal*) ${t(p.cal)}mA`:""}`})}
 /* ---------- work needed (for the QuickBooks estimate; internal) ---------- */
-function workHTML(m){const w=m.work,items=S.lists.workItems||DEFAULT_LISTS.workItems;
+function workHTML(m){return workHTML0(m)+`<div id="work-price">${qbMeterPrice(m)}</div>`}
+function workHTML0(m){const w=m.work,items=S.lists.workItems||DEFAULT_LISTS.workItems;
   return `<div class="stack" style="gap:10px"><div class="row" style="gap:18px">${items.map((it,i)=>`<label class="toggle"><input type="checkbox" id="wk-${i}" data-work="${esc(it)}" ${w.items.includes(it)?"checked":""}>${esc(it)}</label>`).join("")}</div>
     ${w.parts.length?`<div class="tablewrap"><table class="tests" style="max-width:520px"><thead><tr><th>Part</th><th>Qty</th><th></th></tr></thead><tbody>${w.parts.map((p,i)=>`<tr><td>${esc(p.name)}</td><td><input id="wp-${i}" data-partqty="${i}" class="num" inputmode="numeric" value="${esc(p.qty)}" style="width:70px;min-width:0" aria-label="Quantity of ${esc(p.name)}"></td><td><button type="button" class="btn small" data-act="part-rm" data-i="${i}" aria-label="Remove ${esc(p.name)}">✕</button></td></tr>`).join("")}</tbody></table></div>`:""}
     <div class="row" style="align-items:flex-end"><label class="f" style="min-width:260px;flex:1;max-width:420px">Add a part<input id="wp-name" data-ac="parts" autocomplete="off" placeholder="Type to search the parts list"></label>
@@ -1133,7 +1134,7 @@ document.addEventListener("change",async e=>{
   if(t.id==="t-who"){timeWho=t.value;try{localStorage.setItem("mam-who",t.value)}catch(err){}render();return}
   if(t.id==="pf-from"||t.id==="pf-to"){if(t.id==="pf-from")perfFrom=t.value;else perfTo=t.value;if(perfFrom&&perfTo)render();return}
   if((t.id==="f-photo"||t.id==="f-camera")&&editing){const files=[...t.files];t.value="";await addPhotoBlobs(files.map(f=>({blob:f,name:f.name,raw:true})));return}
-  if(t.dataset.work!==undefined&&editing){const w=editing.draft.work;const k=t.dataset.work;w.items=w.items.filter(x=>x!==k);if(t.checked)w.items.push(k);editing.touched=true;scheduleSave();return}
+  if(t.dataset.work!==undefined&&editing){const w=editing.draft.work;const k=t.dataset.work;w.items=w.items.filter(x=>x!==k);if(t.checked)w.items.push(k);editing.touched=true;scheduleSave();const pe=$("#work-price");if(pe)pe.innerHTML=qbMeterPrice(editing.draft);return}
   if(t.dataset.partqty!==undefined&&editing){const p=editing.draft.work.parts[+t.dataset.partqty];if(p){p.qty=String(Math.max(1,Math.round(num(t.value)||1)));t.value=p.qty;scheduleSave()}return}
   if(t.dataset.phlabel!==undefined&&editing){const ph=editing.draft.photos[+t.dataset.phlabel];if(!ph)return;ph.label=t.value.trim();scheduleSave();
     if(ph.itemId&&ph.label){try{await Store.renameFile(ph.itemId,`${safeName(ph.label)}_${ph.addedAt||Date.now()}.jpg`)}catch(err){}}toast("Photo label saved");return}
@@ -1173,7 +1174,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.13.1";
+const APP_VERSION="1.13.2";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1623,7 +1624,7 @@ async function loadQbStatus(){if(QB.loading||!reqApi())return;QB.loading=true;QB
     if(on&&!c.items.length)await qbLoadItems().catch(()=>{})}
   catch(e){QB.err=e.message}
   QB.loading=false;softRender()}
-async function qbLoadItems(){const j=await qbCall("/items");const c=qbCfg();c.items=j.items.map(i=>({id:i.id,name:i.name,type:i.type}));c.itemsAt=Date.now();await saveQbCfg();
+async function qbLoadItems(){const j=await qbCall("/items");const c=qbCfg();c.items=j.items.map(i=>({id:i.id,name:i.name,type:i.type,price:i.price||0}));c.itemsAt=Date.now();await saveQbCfg();
   try{await Store.putFile("customers/qbo-items.json",new Blob([JSON.stringify({loaded:new Date().toISOString(),env:c.env||"",items:j.items})],{type:"application/json"}))}catch(e){} // full list (with prices) for the office to review
   return c.items.length}
 const normSize=x=>String(x||"").replace(/["”″\s]/g,"").toLowerCase();
@@ -1657,6 +1658,13 @@ async function syncQbCustomers(auto){
 async function autoQbSync(){ // once a day, the first person to open the app refreshes the customer list from QuickBooks
   if(MOCK||!qbOn()||qbCfg().env!=="production"||QBO.state==="loading")return; // never fill the real customer list from Intuit's test companyconst age=Date.now()-(Date.parse(QBO.imported||"")||0);
   if(age<20*3600e3)return;try{const n=await syncQbCustomers(true);softRender();console.log("QuickBooks customers updated:",n)}catch(e){console.warn("QuickBooks customer update skipped:",e.message)}}
+const money=n=>"$"+(Math.round(n*100)/100).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const qbItem=id=>qbCfg().items.find(i=>String(i.id)===String(id));
+/* estimate lines with QuickBooks prices, for one meter (shown to techs on the meter page) */
+function qbPriced(o,ms){const {lines,missing}=qbLines(o,ms);let total=0,unknown=false;const rows=lines.map(l=>{const it=qbItem(l.itemId);const p=it&&it.price!=null?it.price:null;if(p==null)unknown=true;else total+=p*l.qty;return {...l,name:it?it.name:"",price:p}});return {rows,total,unknown,missing}}
+function qbMeterPrice(m){if(!qbOn()||!m)return "";const w=m.work||{};if(!(w.items||[]).length&&!(w.parts||[]).length)return "";
+  const {rows,total,unknown,missing}=qbPriced({},[m]);
+  return `<div class="note" style="margin-top:4px">${rows.map(r=>`${esc(r.name)}${r.qty!==1?" ×"+r.qty:""} ${r.price!=null?money(r.price*r.qty):"(no price)"}`).join(" · ")}${rows.length?` · <b>${money(total)}${unknown?"+":""}</b> from QuickBooks prices`:""}${missing.length?` <span class="flag warn">Not linked: ${esc(missing.join(", "))}</span>`:""}</div>`}
 const qbItemName=id=>{const it=qbCfg().items.find(i=>String(i.id)===String(id));return it?it.name:""};
 function qbLines(o,ms){const c=qbCfg(),byName=new Map(c.items.map(i=>[i.name.trim().toLowerCase(),i]));const lines=[],missing=new Set();
   ms.slice().sort((a,b)=>String(a.wo).localeCompare(String(b.wo),undefined,{numeric:true})).forEach(m=>{const w=m.work||{};const tag=`WO ${m.wo}${m.serial?" · SN "+m.serial:""}`;
@@ -1664,10 +1672,11 @@ function qbLines(o,ms){const c=qbCfg(),byName=new Map(c.items.map(i=>[i.name.tri
     (w.parts||[]).forEach(p=>{const it=byName.get(String(p.name).trim().toLowerCase());if(!it){missing.add(`“${p.name}” (part)`);return}lines.push({itemId:it.id,qty:num(p.qty)||1,desc:`${tag} · ${p.name}`})})});
   return {lines,missing:[...missing]}}
 const qbSig=lines=>JSON.stringify(lines);
-function qbEstimateBox(o,ms){if(!qbOn())return "";const q=o.qbo;const {lines,missing}=qbLines(o,ms);const changed=q&&q.sig&&q.sig!==qbSig(lines);
+function qbEstimateBox(o,ms){if(!qbOn())return "";const q=o.qbo;const {lines,missing}=qbLines(o,ms);const changed=q&&q.sig&&q.sig!==qbSig(lines);const pr=qbPriced(o,ms);
   return `<div class="bd stack" style="border-top:1px solid var(--line)"><div class="row spread"><div><b>QuickBooks estimate</b> ${q?`<span class="jstat ${changed?"warn":"done"}">Estimate ${esc(q.docNumber||q.id)}${changed?" · work changed since it was sent":""}</span>`:'<span class="jstat info">Not sent yet</span>'}</div>
     <button class="btn small ${q&&!changed?"":"primary"}" data-act="qb-est" data-id="${o.id}" ${missing.length||!lines.length?"disabled":""}>${q?"Update estimate in QuickBooks":"Create estimate in QuickBooks"}</button></div>
     ${q?`<div class="note">${q.updatedAt?"Updated":"Created"} ${fmtDay(q.updatedAt||q.sentAt)} ${fmtTime(q.updatedAt||q.sentAt)} by ${esc(q.by||"")} · ${q.lines} line${q.lines===1?"":"s"}. Open it in QuickBooks to review prices and send it to the customer.</div>`:`<div class="note">Sends ${lines.length} line${lines.length===1?"":"s"} (one per work item or part, per meter, each starting with the WO and serial) to a new estimate for ${esc(o.client)}. Prices come from QuickBooks.</div>`}
+    ${lines.length?`<div class="note">Estimated total from QuickBooks prices: <b>${money(pr.total)}${pr.unknown?"+":""}</b>${missing.length?" (not counting the unlinked items)":""}. Final prices are whatever is on the estimate in QuickBooks.</div>`:""}
     ${missing.length?`<div class="callout warn">Not linked to a QuickBooks item yet: ${esc(missing.join(", "))}. Link them on the <a href="#qbo">QuickBooks page</a>.</div>`:""}
     ${o.client&&qbCfg().env==="production"&&QBO.state==="ready"&&!qboFor(o.client)?`<div class="callout warn">“${esc(o.client)}” isn't a QuickBooks customer name, so the estimate can't be created. Pick the client from the QuickBooks list.</div>`:""}</div>`}
 async function qbSendEstimate(o,a){const ms=metersOf(o.id);const {lines,missing}=qbLines(o,ms);if(missing.length||!lines.length)return;
