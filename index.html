@@ -1173,7 +1173,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.13.0";
+const APP_VERSION="1.13.1";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1627,6 +1627,21 @@ async function qbLoadItems(){const j=await qbCall("/items");const c=qbCfg();c.it
   try{await Store.putFile("customers/qbo-items.json",new Blob([JSON.stringify({loaded:new Date().toISOString(),env:c.env||"",items:j.items})],{type:"application/json"}))}catch(e){} // full list (with prices) for the office to review
   return c.items.length}
 const normSize=x=>String(x||"").replace(/["”″\s]/g,"").toLowerCase();
+/* "Fill in from item names": MAM's test items are named "Test <size> <kind>", e.g. Test .625x.75" PD Multi, Test 2" Turbine / Propeller */
+const QB_KINDS=[[/pd|multi|displacement/i,["Displacement","Multi-jet","Singlejet"]],[/turbine|propeller/i,["Turbine","Propeller"]],[/mag|ultrasonic/i,["Electromagnetic","Ultrasonic"]],[/compound/i,["Compound"]]];
+function sizeKey(x){const fr=t=>{t=t.trim();let m=t.match(/^(\d+)-(\d+)\/(\d+)$/);if(m)return +m[1]+m[2]/m[3];m=t.match(/^(\d+)\/(\d+)$/);if(m)return m[1]/m[2];const n=parseFloat(t);return isNaN(n)?null:n};
+  const parts=String(x||"").replace(/["”″]/g,"").toLowerCase().split(/\s*x\s*/).map(fr);return parts.some(v=>v==null)?"":parts.map(v=>+v.toFixed(3)).join("x")}
+function qbAutoFill(){const c=qbCfg(),sizes=S.lists.sizes||DEFAULT_LISTS.sizes,made=[],gaps=[];
+  const tests=c.items.map(i=>{const m=i.name.match(/^test\s+([\d./]+(?:\s*x\s*[\d./]+)?)["”″]?\s+(.+)$/i);if(!m)return null;const k=QB_KINDS.find(([re])=>re.test(m[2]));return k?{id:i.id,size:sizeKey(m[1]),types:k[1]}:null}).filter(Boolean);
+  const keep=c.rules.filter(r=>r.work!=="Test"||!r.auto);
+  sizes.forEach(z=>TYPES.forEach(t=>{const it=tests.find(x=>x.size===sizeKey(z)&&x.types.includes(t));
+    if(it){if(!keep.some(r=>r.work==="Test"&&r.size===z&&r.type===t))made.push({work:"Test",size:z,type:t,itemId:it.id,auto:true})}else gaps.push(`${z} ${t}`)}));
+  c.rules=[...keep,...made];
+  const by=re=>{const i=c.items.find(x=>re.test(x.name));return i&&i.id};
+  if(!c.map.Clean){const id=by(/^clean/i);if(id)c.map.Clean=id}
+  if(!c.map.Calibrate){const id=by(/^calibrat/i);if(id)c.map.Calibrate=id}
+  if(c.map.Test&&made.length)delete c.map.Test; // a single catch-all test item would hide missing sizes
+  return {made:made.length,gaps}}
 /* the QuickBooks item for a work checkbox on a given meter: the most specific matching row (size + type, then size, then type), else the default */
 function qbItemFor(work,m){const c=qbCfg();let best=null,bs=-1;
   c.rules.forEach(r=>{if(r.work!==work||!r.itemId)return;const sOk=!r.size||normSize(r.size)===normSize(m.size),tOk=!r.type||r.type===m.type;if(!sOk||!tOk)return;
@@ -1685,7 +1700,8 @@ function viewQbo(){const st=QB.status,c=qbCfg(),r=route();
   return `<div class="stack" style="max-width:900px"><h1>QuickBooks</h1>
     ${msg?`<div class="callout ${msg[0]==="ok"?"info":"warn"}">${msg[1]}</div>`:""}
     <div class="panel"><div class="hd"><h2>Connection</h2></div><div class="bd stack">${statusHTML}</div></div>
-    ${on?`<div class="panel"><div class="hd"><h2>Work needed → QuickBooks items</h2><button class="btn small" data-act="qb-items">Reload items from QuickBooks</button></div><div class="bd stack">
+    ${on?`<div class="panel"><div class="hd"><h2>Work needed → QuickBooks items</h2><div class="row"><button class="btn small primary" data-act="qb-autofill">Fill in from item names</button><button class="btn small" data-act="qb-items">Reload items from QuickBooks</button></div></div><div class="bd stack">
+      ${QB.gaps&&QB.gaps.length?`<details class="callout warn"><summary>${QB.gaps.length} size and type combinations have no QuickBooks test item (many probably don't exist). Click to see them.</summary><div style="margin-top:6px">${esc(QB.gaps.join(", "))}. If a meter like that comes in, its estimate waits until a row is added here.</div></details>`:""}
       <div class="note">Each Work needed checkbox becomes an estimate line. When the price depends on the meter, add rows by size and type. ${c.items.length.toLocaleString()} items loaded${c.itemsAt?" "+fmtDay(c.itemsAt):""}.</div>
       ${work.map(w=>{const rows=c.rules.map((r,i)=>[r,i]).filter(([r])=>r.work===w);
         return `<div class="stack" style="gap:6px;border-top:1px solid var(--line);padding-top:10px"><div class="row spread"><b>${esc(w)}</b><button class="btn small" data-act="qb-rule-add" data-work="${esc(w)}">Add a size / type row</button></div>
@@ -1702,6 +1718,8 @@ function viewQbo(){const st=QB.status,c=qbCfg(),r=route();
 async function qbAction(act,a){
   if(act==="qb-connect"){a.disabled=true;try{const j=await qbCall("/start",{method:"POST"});location.href=j.url}catch(e){a.disabled=false;toast("Couldn't start: "+e.message)}return true}
   if(act==="qb-disconnect"){if(!confirmClick(a,"Click again to disconnect"))return true;a.disabled=true;try{await qbCall("/disconnect",{method:"POST"});qbCfg().connected=false;await saveQbCfg();QB.status=null;toast("QuickBooks disconnected")}catch(e){toast("Couldn't disconnect: "+e.message)}render();return true}
+  if(act==="qb-autofill"){if(!confirmClick(a,"Click again to fill in the Test rows from QuickBooks item names"))return true;const r=qbAutoFill();
+    try{await saveQbCfg();QB.gaps=r.gaps;toast(`${r.made} Test rows filled in.`)}catch(e){toast("Couldn't save: "+e.message)}render();return true}
   if(act==="qb-rule-add"){qbCfg().rules.push({work:a.dataset.work,size:"",type:"",itemId:""});render();return true}
   if(act==="qb-rule-del"){qbCfg().rules.splice(+a.dataset.i,1);try{await saveQbCfg()}catch(e){toast("Couldn't save: "+e.message)}render();return true}
   if(act==="qb-items"){a.disabled=true;a.textContent="Loading…";try{const n=await qbLoadItems();toast(`${n.toLocaleString()} QuickBooks items loaded`)}catch(e){toast("Couldn't load items: "+e.message)}render();return true}
