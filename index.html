@@ -1141,6 +1141,7 @@ document.addEventListener("change",async e=>{
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
   if(t.id==="req-filter"){reqFilter=t.value;render();return}
+  if(t.dataset&&t.dataset.qbrule){const [i,f]=t.dataset.qbrule.split("|");const r=qbCfg().rules[+i];if(r){r[f]=t.value;try{await saveQbCfg()}catch(err){toast("Couldn't save: "+err.message)}}return}
   if(t.dataset&&t.dataset.qbmap!==undefined){const c=qbCfg();if(t.value)c.map[t.dataset.qbmap]=t.value;else delete c.map[t.dataset.qbmap];try{await saveQbCfg();toast(t.value?`“${t.dataset.qbmap}” → ${qbItemName(t.value)}`:"Link removed")}catch(err){toast("Couldn't save: "+err.message)}render();return}
   if(t.id==="rq-customer"&&reqDraft){reqDraft.customer=t.value;const pf=reqPrefillFromCustomer(t.value);["contact","email","phone"].forEach(k=>{if(!reqDraft[k]&&pf[k]){reqDraft[k]=pf[k];const el=$("#rq-"+k);if(el)el.value=pf[k]}});
     const h=$("#rq-hint");if(h){const c=qboFor(t.value);const ad=reqAddresses(t.value);h.innerHTML=t.value.trim()?`<div class="note">${c?"QuickBooks customer.":"Not in QuickBooks; it will be added as a new customer name."} ${ad.shipTo?"Their default return address will be filled in on the form.":"No return address on file; they'll type it."}</div>`:""}return}
@@ -1172,7 +1173,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.12.4";
+const APP_VERSION="1.13.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1608,7 +1609,7 @@ function fillFromQbo(n,overwrite){
 }
 /* ---------- QuickBooks Online: live connection through the online service (worker /qbo) ---------- */
 const QB={status:null,loading:false,err:"",items:null};
-const qbCfg=()=>S.qbCfg||(S.qbCfg={map:{},items:[],itemsAt:0,connected:false});
+const qbCfg=()=>{const c=S.qbCfg||(S.qbCfg={map:{},items:[],itemsAt:0,connected:false});if(!Array.isArray(c.rules))c.rules=[];return c};
 const qbOn=()=>!!(qbCfg().connected&&reqApi());
 async function qbCall(path,opt={}){const api=reqApi();if(!api)throw new Error("The online service isn't set up yet (Limits & lists → Customer request form).");
   const headers={Authorization:"Bearer "+(MOCK?"mock":await getToken())};let body;if(opt.json!==undefined){headers["Content-Type"]="application/json";body=JSON.stringify(opt.json)}
@@ -1622,7 +1623,15 @@ async function loadQbStatus(){if(QB.loading||!reqApi())return;QB.loading=true;QB
     if(on&&!c.items.length)await qbLoadItems().catch(()=>{})}
   catch(e){QB.err=e.message}
   QB.loading=false;softRender()}
-async function qbLoadItems(){const j=await qbCall("/items");const c=qbCfg();c.items=j.items.map(i=>({id:i.id,name:i.name,type:i.type}));c.itemsAt=Date.now();await saveQbCfg();return c.items.length}
+async function qbLoadItems(){const j=await qbCall("/items");const c=qbCfg();c.items=j.items.map(i=>({id:i.id,name:i.name,type:i.type}));c.itemsAt=Date.now();await saveQbCfg();
+  try{await Store.putFile("customers/qbo-items.json",new Blob([JSON.stringify({loaded:new Date().toISOString(),env:c.env||"",items:j.items})],{type:"application/json"}))}catch(e){} // full list (with prices) for the office to review
+  return c.items.length}
+const normSize=x=>String(x||"").replace(/["”″\s]/g,"").toLowerCase();
+/* the QuickBooks item for a work checkbox on a given meter: the most specific matching row (size + type, then size, then type), else the default */
+function qbItemFor(work,m){const c=qbCfg();let best=null,bs=-1;
+  c.rules.forEach(r=>{if(r.work!==work||!r.itemId)return;const sOk=!r.size||normSize(r.size)===normSize(m.size),tOk=!r.type||r.type===m.type;if(!sOk||!tOk)return;
+    const sc=(r.size?2:0)+(r.type?1:0);if(sc>bs){bs=sc;best=r.itemId}});
+  return best||c.map[work]||""}
 async function syncQbCustomers(auto){
   const j=await qbCall("/customers");if(!j.customers||!j.customers.length)throw new Error("QuickBooks returned no customers.");
   if(qbCfg().env!=="production")throw new Error("Connected to Intuit's test company, so the customer list wasn't changed.");
@@ -1636,7 +1645,7 @@ async function autoQbSync(){ // once a day, the first person to open the app ref
 const qbItemName=id=>{const it=qbCfg().items.find(i=>String(i.id)===String(id));return it?it.name:""};
 function qbLines(o,ms){const c=qbCfg(),byName=new Map(c.items.map(i=>[i.name.trim().toLowerCase(),i]));const lines=[],missing=new Set();
   ms.slice().sort((a,b)=>String(a.wo).localeCompare(String(b.wo),undefined,{numeric:true})).forEach(m=>{const w=m.work||{};const tag=`WO ${m.wo}${m.serial?" · SN "+m.serial:""}`;
-    (w.items||[]).forEach(it=>{const id=c.map[it];if(!id){missing.add(`“${it}” (work checkbox)`);return}lines.push({itemId:id,qty:1,desc:`${tag} · ${it}`})});
+    (w.items||[]).forEach(it=>{const id=qbItemFor(it,m);if(!id){missing.add(`“${it}” for a ${[m.size,m.type].filter(Boolean).join(" ")||"meter with no size or type"} (WO ${m.wo})`);return}lines.push({itemId:id,qty:1,desc:`${tag} · ${it}`})});
     (w.parts||[]).forEach(p=>{const it=byName.get(String(p.name).trim().toLowerCase());if(!it){missing.add(`“${p.name}” (part)`);return}lines.push({itemId:it.id,qty:num(p.qty)||1,desc:`${tag} · ${p.name}`})})});
   return {lines,missing:[...missing]}}
 const qbSig=lines=>JSON.stringify(lines);
@@ -1677,8 +1686,15 @@ function viewQbo(){const st=QB.status,c=qbCfg(),r=route();
     ${msg?`<div class="callout ${msg[0]==="ok"?"info":"warn"}">${msg[1]}</div>`:""}
     <div class="panel"><div class="hd"><h2>Connection</h2></div><div class="bd stack">${statusHTML}</div></div>
     ${on?`<div class="panel"><div class="hd"><h2>Work needed → QuickBooks items</h2><button class="btn small" data-act="qb-items">Reload items from QuickBooks</button></div><div class="bd stack">
-      <div class="note">Each Work needed checkbox becomes an estimate line with the QuickBooks item you pick here. ${c.items.length.toLocaleString()} items loaded${c.itemsAt?" "+fmtDay(c.itemsAt):""}.</div>
-      <table class="list" style="max-width:640px"><thead><tr><th>Checkbox</th><th>QuickBooks item</th></tr></thead><tbody>${work.map(w=>`<tr><td>${esc(w)}</td><td><select data-qbmap="${esc(w)}">${opts(c.map[w])}</select></td></tr>`).join("")}</tbody></table>
+      <div class="note">Each Work needed checkbox becomes an estimate line. When the price depends on the meter, add rows by size and type. ${c.items.length.toLocaleString()} items loaded${c.itemsAt?" "+fmtDay(c.itemsAt):""}.</div>
+      ${work.map(w=>{const rows=c.rules.map((r,i)=>[r,i]).filter(([r])=>r.work===w);
+        return `<div class="stack" style="gap:6px;border-top:1px solid var(--line);padding-top:10px"><div class="row spread"><b>${esc(w)}</b><button class="btn small" data-act="qb-rule-add" data-work="${esc(w)}">Add a size / type row</button></div>
+        <table class="list"><thead><tr><th style="width:150px">Meter size</th><th style="width:170px">Meter type</th><th>QuickBooks item</th><th></th></tr></thead><tbody>
+        ${rows.map(([r,i])=>`<tr><td><select data-qbrule="${i}|size"><option value="">Any size</option>${(S.lists.sizes||DEFAULT_LISTS.sizes).map(z=>`<option ${z===r.size?"selected":""}>${esc(z)}</option>`).join("")}</select></td>
+          <td><select data-qbrule="${i}|type"><option value="">Any type</option>${TYPES.map(t=>`<option ${t===r.type?"selected":""}>${esc(t)}</option>`).join("")}</select></td>
+          <td><select data-qbrule="${i}|itemId">${opts(r.itemId)}</select></td><td><button class="btn small" data-act="qb-rule-del" data-i="${i}" title="Remove this row">✕</button></td></tr>`).join("")}
+        <tr><td colspan="2" class="note">${rows.length?"Any other meter":"Every meter"}</td><td><select data-qbmap="${esc(w)}">${opts(c.map[w])}</select></td><td></td></tr></tbody></table></div>`}).join("")}
+      <div class="note">For each meter, the most specific row wins: size and type, then size only, then type only, then the bottom row. If nothing matches, the estimate waits and says which meter needs a row.</div>
       <div class="note">Parts are matched to QuickBooks items by name. <button class="linkbtn" data-act="qb-parts">Replace the Parts list with the QuickBooks items</button> so every part a tech can pick matches. ${(()=>{const names=new Set(c.items.map(i=>i.name.trim().toLowerCase()));const bad=(S.lists.parts||[]).filter(p=>!names.has(String(p).trim().toLowerCase()));return bad.length?`<b>${bad.length} part${bad.length===1?"":"s"} in the current list ${bad.length===1?"isn't a QuickBooks item":"aren't QuickBooks items"}:</b> ${esc(bad.slice(0,8).join(", "))}${bad.length>8?"…":""}`:"All parts in the list match QuickBooks items."})()}</div></div></div>
     <div class="panel"><div class="hd"><h2>Customers</h2>${test?"":`<button class="btn small" data-act="qb-customers">Update customers now</button>`}</div><div class="bd stack">${test?`<div class="callout info">While connected to Intuit's test company, the app keeps your real customer list and doesn't update it from QuickBooks.</div>`:""}
       <div class="note">The customer list (client names, contacts and addresses) now comes straight from QuickBooks and updates automatically once a day. ${QBO.state==="ready"?`${QBO.list.length.toLocaleString()} customers, last updated ${QBO.imported?new Date(QBO.imported).toLocaleString():""}${QBO.importedBy?" ("+esc(QBO.importedBy)+")":""}.`:""}</div></div></div>`:""}
@@ -1686,6 +1702,8 @@ function viewQbo(){const st=QB.status,c=qbCfg(),r=route();
 async function qbAction(act,a){
   if(act==="qb-connect"){a.disabled=true;try{const j=await qbCall("/start",{method:"POST"});location.href=j.url}catch(e){a.disabled=false;toast("Couldn't start: "+e.message)}return true}
   if(act==="qb-disconnect"){if(!confirmClick(a,"Click again to disconnect"))return true;a.disabled=true;try{await qbCall("/disconnect",{method:"POST"});qbCfg().connected=false;await saveQbCfg();QB.status=null;toast("QuickBooks disconnected")}catch(e){toast("Couldn't disconnect: "+e.message)}render();return true}
+  if(act==="qb-rule-add"){qbCfg().rules.push({work:a.dataset.work,size:"",type:"",itemId:""});render();return true}
+  if(act==="qb-rule-del"){qbCfg().rules.splice(+a.dataset.i,1);try{await saveQbCfg()}catch(e){toast("Couldn't save: "+e.message)}render();return true}
   if(act==="qb-items"){a.disabled=true;a.textContent="Loading…";try{const n=await qbLoadItems();toast(`${n.toLocaleString()} QuickBooks items loaded`)}catch(e){toast("Couldn't load items: "+e.message)}render();return true}
   if(act==="qb-parts"){const c=qbCfg();const parts=c.items.filter(i=>i.type!=="Service");const use=(parts.length?parts:c.items).map(i=>i.name);if(!use.length){toast("Load the QuickBooks items first.");return true}
     if(!confirmClick(a,`Click again to replace the Parts list with ${use.length} QuickBooks items`))return true;
