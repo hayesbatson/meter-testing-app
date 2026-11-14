@@ -485,7 +485,7 @@ async function xlRead(file){if(!window.XLSX)throw new Error("The Excel tool didn
   B.xl={file,sheet,C,data,manifest,ops,map:Object.fromEntries(ops.map(o=>[o,guess(o)]))}}
 function xlBuild(){const {C,data,map}=B.xl;const v=i=>r=>String(r[i]==null?"":r[i]).trim();const runs=[],blocked=[];let cur=null,key="";
   data.forEach(r=>{const g=k=>v(C[k])(r);const reads=[...C.beg,...C.end].some(i=>v(i)(r));
-    if(!reads){if(/lock|stuck|frozen|seized|no reg|could not|couldn.t/i.test(g("notes"))||!g("arrive")){blocked.push({ser:g("ser"),wo:"",arrive:g("arrive"),run:null,pos:null,date:DATE_FROM_SHEET(g("date"))||today(),tech:map[g("op")]||g("op"),by:ME(),note:g("notes")});return}}
+    if(!reads){if(/lock|stuck|frozen|seized|no reg|could not|couldn.t/i.test(g("notes"))){blocked.push({ser:g("ser"),wo:"",arrive:g("arrive"),run:null,pos:null,date:DATE_FROM_SHEET(g("date"))||today(),tech:map[g("op")]||g("op"),by:ME(),note:g("notes")});return}}
     const size=SIZE_FROM_SHEET(g("size")),date=DATE_FROM_SHEET(g("date")),tech=map[g("op")]||g("op");
     const vols=C.vol.map(i=>v(i)(r)),flows=C.flow.map(i=>v(i)(r).replace(/^\./,"0."));
     const k=[date,tech,size,g("make"),g("model"),g("unit"),vols.join("|"),flows.join("|")].join("~");
