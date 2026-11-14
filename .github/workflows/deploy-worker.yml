@@ -28,6 +28,10 @@ jobs:
           secrets: |
             CLIENT_ID
             CLIENT_SECRET
+            QBO_CLIENT_ID
+            QBO_CLIENT_SECRET
         env:
           CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          QBO_CLIENT_ID: ${{ secrets.QBO_CLIENT_ID }}
+          QBO_CLIENT_SECRET: ${{ secrets.QBO_CLIENT_SECRET }}

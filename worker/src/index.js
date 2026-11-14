@@ -3,6 +3,8 @@
    in the SharePoint list "MTA Requests" with an app permission limited to the Meter Testing App site (Sites.Selected).
    Secrets/settings come from Cloudflare: TENANT_ID, CLIENT_ID, CLIENT_SECRET, SITE (host:path), ALLOWED_ORIGIN. */
 
+import { handleQbo } from "./qbo.js";
+
 const LIST_NAME = "MTA Requests";
 const MAX_BODY = 200_000;      // bytes
 const MAX_METER_ROWS = 100;
@@ -19,7 +21,7 @@ export default {
     const cors = {
       "Access-Control-Allow-Origin": allowed.includes(origin) ? origin : allowed[0],
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Access-Control-Max-Age": "86400",
       "Vary": "Origin",
     };
@@ -29,6 +31,10 @@ export default {
     const url = new URL(req.url);
     if (url.pathname === "/" || url.pathname === "/health") return json({ ok: true, service: "MTA Requests" });
     if (url.pathname === "/diag") return json(await diag(env));
+    if (url.pathname.startsWith("/qbo/")) {
+      try { return await handleQbo(req, env, G(env), url, json); }
+      catch (e) { return json({ error: "Something went wrong reaching QuickBooks. Try again in a minute." }, 502); }
+    }
     const m = url.pathname.match(/^\/r\/(\d{1,9})\.([A-Za-z0-9_-]{20,64})$/);
     if (!m) return json({ error: "Not found" }, 404);
     const [, itemId, token] = m;
@@ -123,6 +129,19 @@ async function graph(env, path, opt = {}) {
   if (!r.ok) throw new Error("graph " + r.status);
   return r.status === 204 ? {} : r.json();
 }
+const listCache = {};
+const G = env => ({
+  graph: (path, opt) => graph(env, path, opt),
+  siteId: async () => (await resolveIds(env)).site,
+  listId: async name => {
+    if (listCache[name]) return listCache[name];
+    const site = (await resolveIds(env)).site;
+    const lists = await graph(env, `/sites/${site}/lists?$select=id,displayName&$top=200`);
+    const l = (lists.value || []).find(x => x.displayName === name);
+    if (!l) throw new Error("list " + name);
+    return (listCache[name] = l.id);
+  },
+});
 async function resolveIds(env) {
   if (ids.site && ids.list) return ids;
   const site = await graph(env, `/sites/${env.SITE}`);

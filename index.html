@@ -301,6 +301,7 @@ function route(){
   const h=decodeURIComponent(location.hash.slice(1));
   for(const p of ["job","meter","report","hist","email","cust","req"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
   if(h.startsWith("order-"))return{v:"job",id:h.slice(6)};
+  if(h==="qbo"||h.startsWith("qbo-"))return{v:"qbo",id:h.slice(4)};
   if(h==="review"||h==="setup"||h==="perf"||h==="customers"||h==="addrimport"||h==="requests"||h==="reqnew")return{v:h};
   return{v:"jobs"};
 }
@@ -314,7 +315,7 @@ function render(){
   const reviewN=[...S.meters.values()].filter(m=>m.status==="ready"||m.status==="question").length;
   const reqN=REQ.state==="ready"?reqSubmittedN():0;
   $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["requests","Requests"+(reqN?`<span class="count">${reqN}</span>`:"")],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["customers","Customers"],["perf","Performance"],["setup","Limits &amp; lists"]]
-    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v)))?"on":""}">${t}</a>`).join("");
+    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v))||(h==="setup"&&r.v==="qbo"))?"on":""}">${t}</a>`).join("");
   $("#mode").innerHTML=account&&mode!=="signin"?`${esc(account.name||account.username||"")} · <a href="#" data-act="signout">Sign out</a>`:"";
   $("#nav").hidden=mode!=="ready";
   const app=$("#app");
@@ -328,6 +329,7 @@ function render(){
   else if(r.v==="report"){app.innerHTML=viewReport(r.id);fillPhotos()}
   else if(r.v==="review")app.innerHTML=viewReview();
   else if(r.v==="setup")app.innerHTML=viewSetup();
+  else if(r.v==="qbo")app.innerHTML=viewQbo();
   else if(r.v==="perf")app.innerHTML=viewPerf();
   else if(r.v==="customers")app.innerHTML=viewCustomers();
   else if(r.v==="requests")app.innerHTML=viewRequests();
@@ -578,7 +580,7 @@ function workPanel(o,ms){const tot=workSummary(ms);if(!tot.size)return "";
   return `<div class="panel"><div class="hd"><h2>Work needed (for the estimate)</h2><button class="btn small" data-act="work-copy" data-id="${o.id}">Copy list</button></div>
     <div class="bd grid g2" style="align-items:start"><div><div class="note" style="margin-bottom:6px">Totals for the job</div><table class="list"><thead><tr><th>Item</th><th class="num">Qty</th></tr></thead><tbody>${[...tot].map(([k,q])=>`<tr><td>${esc(k)}</td><td class="num">${q}</td></tr>`).join("")}</tbody></table></div>
     <div><div class="note" style="margin-bottom:6px">By meter</div><table class="list"><thead><tr><th>WO</th><th>Serial</th><th>Work</th></tr></thead><tbody>${per.map(m=>`<tr><td><span class="wo">${esc(m.wo)}</span></td><td class="mono">${esc(m.serial)}</td><td style="white-space:normal">${esc([...(m.work.items||[]),...(m.work.parts||[]).map(p=>`${p.name}${(num(p.qty)||1)>1?" ×"+p.qty:""}`)].join(", "))}</td></tr>`).join("")}</tbody></table></div></div>
-    <div class="bd note" style="padding-top:0">Copy list puts the totals and the per-meter detail on the clipboard to paste into the QuickBooks estimate. A direct QuickBooks link can replace this later.</div></div>`}
+    ${qbOn()?qbEstimateBox(o,ms):`<div class="bd note" style="padding-top:0">Copy list puts the totals and the per-meter detail on the clipboard to paste into the QuickBooks estimate. Connect QuickBooks (Limits &amp; lists → QuickBooks) to create the estimate directly.</div>`}</div>`}
 function workText(o,ms){const tot=workSummary(ms);return [`${o.client} · ${jobName(o)}`,"",...[...tot].map(([k,q])=>`${q}\t${k}`),"",...ms.filter(m=>m.work&&((m.work.items||[]).length||(m.work.parts||[]).length)).map(m=>`WO ${m.wo} ${m.serial}: ${[...(m.work.items||[]),...(m.work.parts||[]).map(p=>`${p.name}${(num(p.qty)||1)>1?" x"+p.qty:""}`)].join(", ")}`)].join("\n")}
 /* ---------- job notes (office ↔ techs) ---------- */
 function notesList(o,compact){const ns=[...(o.notes||[])].sort((a,b)=>b.at-a.at);
@@ -961,6 +963,7 @@ document.addEventListener("click",async e=>{
       S.orders.set(o.id,n);try{await put("orders",o.id,n);toast(n.shipAddrId?"Filled from the address book":"Filled from QuickBooks")}catch(err){toast("Couldn't save: "+err.message)}render();return}
     if(act==="track-copy"){copyText(a.dataset.t).then(ok=>{if(ok)toast("Tracking number copied. Paste it on the carrier's page.")});return}
     if(act&&act.startsWith("req-")&&await reqAction(act,a))return;
+    if(act&&act.startsWith("qb-")&&await qbAction(act,a))return;
     if(act==="addr-setup"){a.disabled=true;a.textContent="Setting up…";
       try{const n=await setupAddresses();toast(`Address book ready: ${ADDR.list.length.toLocaleString()} addresses`)}catch(err){toast("Couldn't set up the address book: "+err.message);ADDR.state=Store.hasList("addresses")?"ready":"missing"}render();return}
     if(act==="exp-ups"||act==="exp-fedex"){exportCarrier(act==="exp-ups"?"UPS":"FedEx");return}
@@ -1138,6 +1141,7 @@ document.addEventListener("change",async e=>{
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
   if(t.id==="req-filter"){reqFilter=t.value;render();return}
+  if(t.dataset&&t.dataset.qbmap!==undefined){const c=qbCfg();if(t.value)c.map[t.dataset.qbmap]=t.value;else delete c.map[t.dataset.qbmap];try{await saveQbCfg();toast(t.value?`“${t.dataset.qbmap}” → ${qbItemName(t.value)}`:"Link removed")}catch(err){toast("Couldn't save: "+err.message)}render();return}
   if(t.id==="rq-customer"&&reqDraft){reqDraft.customer=t.value;const pf=reqPrefillFromCustomer(t.value);["contact","email","phone"].forEach(k=>{if(!reqDraft[k]&&pf[k]){reqDraft[k]=pf[k];const el=$("#rq-"+k);if(el)el.value=pf[k]}});
     const h=$("#rq-hint");if(h){const c=qboFor(t.value);const ad=reqAddresses(t.value);h.innerHTML=t.value.trim()?`<div class="note">${c?"QuickBooks customer.":"Not in QuickBooks; it will be added as a new customer name."} ${ad.shipTo?"Their default return address will be filled in on the form.":"No return address on file; they'll type it."}</div>`:""}return}
   if(t.id==="jfilter"){jobFilter=t.value;render();return}
@@ -1168,7 +1172,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.11.1";
+const APP_VERSION="1.12.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1320,6 +1324,7 @@ async function loadAll(){
   config.forEach(c=>{S.configIds[c.key]=c.id;
     if(c.key==="limits"&&c.limits)S.limits=c.limits;
     if(c.key==="lists"&&c.lists)S.lists={...DEFAULT_LISTS,...c.lists};
+    if(c.key==="qbo")S.qbCfg={map:{},items:[],itemsAt:0,connected:false,...c};
     if(c.key==="settings")S.settings={...S.settings,...c,techLinks:c.techLinks||{}}});
   S.loadedO=S.loadedM=true;
   const linked=(S.settings.techLinks||{})[userName().toLowerCase()];
@@ -1362,7 +1367,7 @@ async function afterSignIn(){
     const ok=await Store.connect();
     if(!ok){mode="setup";render();return}
     await loadAll();mode="ready";render();
-    loadHistory();loadQbo();loadAddresses().then(softRender);loadRequests().then(softRender);
+    loadHistory();loadQbo().then(autoQbSync);loadAddresses().then(softRender);loadRequests().then(softRender);
     clearInterval(refreshTimer);refreshTimer=setInterval(refresh,60000);
   }catch(e){mode="error";loadError=e.status===403||e.status===401?"Your Microsoft account doesn't have access to the Meter Testing App SharePoint site. Ask Hayes to add you as a member. ("+e.message+")":e.message;render()}
 }
@@ -1601,6 +1606,91 @@ function fillFromQbo(n,overwrite){
   }
   return true;
 }
+/* ---------- QuickBooks Online: live connection through the online service (worker /qbo) ---------- */
+const QB={status:null,loading:false,err:"",items:null};
+const qbCfg=()=>S.qbCfg||(S.qbCfg={map:{},items:[],itemsAt:0,connected:false});
+const qbOn=()=>!!(qbCfg().connected&&reqApi());
+async function qbCall(path,opt={}){const api=reqApi();if(!api)throw new Error("The online service isn't set up yet (Limits & lists → Customer request form).");
+  const headers={Authorization:"Bearer "+(MOCK?"mock":await getToken())};let body;if(opt.json!==undefined){headers["Content-Type"]="application/json";body=JSON.stringify(opt.json)}
+  let r;try{r=await fetch(`https://${api}/qbo${path}`,{method:opt.method||"GET",headers,body})}catch(e){throw new Error("Can't reach the online service. Check the internet connection and try again.")}
+  const j=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(j.error||("Error "+r.status));e.status=r.status;e.data=j;throw e}return j}
+async function saveQbCfg(){await putConfig("qbo",qbCfg())}
+async function loadQbStatus(){if(QB.loading||!reqApi())return;QB.loading=true;QB.err="";
+  try{QB.status=await qbCall("/status");const c=qbCfg();const on=!!QB.status.connected;
+    if(c.connected!==on){c.connected=on;c.company=QB.status.company||"";await saveQbCfg().catch(()=>{})}
+    if(on&&!c.items.length)await qbLoadItems().catch(()=>{})}
+  catch(e){QB.err=e.message}
+  QB.loading=false;softRender()}
+async function qbLoadItems(){const j=await qbCall("/items");const c=qbCfg();c.items=j.items.map(i=>({id:i.id,name:i.name,type:i.type}));c.itemsAt=Date.now();await saveQbCfg();return c.items.length}
+async function syncQbCustomers(auto){
+  const j=await qbCall("/customers");if(!j.customers||!j.customers.length)throw new Error("QuickBooks returned no customers.");
+  const d={imported:new Date().toISOString(),importedBy:auto?"automatic update":userName(),source:"QuickBooks Online",customers:j.customers};
+  await Store.putFile("customers/qbo-customers.json",new Blob([JSON.stringify(d)],{type:"application/json"}));setQbo(d);
+  if(ADDR.state==="ready")await seedFromQbo().catch(()=>{});
+  return d.customers.length}
+async function autoQbSync(){ // once a day, the first person to open the app refreshes the customer list from QuickBooks
+  if(MOCK||!qbOn()||QBO.state==="loading")return;const age=Date.now()-(Date.parse(QBO.imported||"")||0);
+  if(age<20*3600e3)return;try{const n=await syncQbCustomers(true);softRender();console.log("QuickBooks customers updated:",n)}catch(e){console.warn("QuickBooks customer update skipped:",e.message)}}
+const qbItemName=id=>{const it=qbCfg().items.find(i=>String(i.id)===String(id));return it?it.name:""};
+function qbLines(o,ms){const c=qbCfg(),byName=new Map(c.items.map(i=>[i.name.trim().toLowerCase(),i]));const lines=[],missing=new Set();
+  ms.slice().sort((a,b)=>String(a.wo).localeCompare(String(b.wo),undefined,{numeric:true})).forEach(m=>{const w=m.work||{};const tag=`WO ${m.wo}${m.serial?" · SN "+m.serial:""}`;
+    (w.items||[]).forEach(it=>{const id=c.map[it];if(!id){missing.add(`“${it}” (work checkbox)`);return}lines.push({itemId:id,qty:1,desc:`${tag} · ${it}`})});
+    (w.parts||[]).forEach(p=>{const it=byName.get(String(p.name).trim().toLowerCase());if(!it){missing.add(`“${p.name}” (part)`);return}lines.push({itemId:it.id,qty:num(p.qty)||1,desc:`${tag} · ${p.name}`})})});
+  return {lines,missing:[...missing]}}
+const qbSig=lines=>JSON.stringify(lines);
+function qbEstimateBox(o,ms){if(!qbOn())return "";const q=o.qbo;const {lines,missing}=qbLines(o,ms);const changed=q&&q.sig&&q.sig!==qbSig(lines);
+  return `<div class="bd stack" style="border-top:1px solid var(--line)"><div class="row spread"><div><b>QuickBooks estimate</b> ${q?`<span class="jstat ${changed?"warn":"done"}">Estimate ${esc(q.docNumber||q.id)}${changed?" · work changed since it was sent":""}</span>`:'<span class="jstat info">Not sent yet</span>'}</div>
+    <button class="btn small ${q&&!changed?"":"primary"}" data-act="qb-est" data-id="${o.id}" ${missing.length||!lines.length?"disabled":""}>${q?"Update estimate in QuickBooks":"Create estimate in QuickBooks"}</button></div>
+    ${q?`<div class="note">${q.updatedAt?"Updated":"Created"} ${fmtDay(q.updatedAt||q.sentAt)} ${fmtTime(q.updatedAt||q.sentAt)} by ${esc(q.by||"")} · ${q.lines} line${q.lines===1?"":"s"}. Open it in QuickBooks to review prices and send it to the customer.</div>`:`<div class="note">Sends ${lines.length} line${lines.length===1?"":"s"} (one per work item or part, per meter, each starting with the WO and serial) to a new estimate for ${esc(o.client)}. Prices come from QuickBooks.</div>`}
+    ${missing.length?`<div class="callout warn">Not linked to a QuickBooks item yet: ${esc(missing.join(", "))}. Link them on the <a href="#qbo">QuickBooks page</a>.</div>`:""}
+    ${o.client&&QBO.state==="ready"&&!qboFor(o.client)?`<div class="callout warn">“${esc(o.client)}” isn't a QuickBooks customer name, so the estimate can't be created. Pick the client from the QuickBooks list.</div>`:""}</div>`}
+async function qbSendEstimate(o,a){const ms=metersOf(o.id);const {lines,missing}=qbLines(o,ms);if(missing.length||!lines.length)return;
+  const q=o.qbo;const by=S.myTech||(account&&account.name)||userName();
+  a.disabled=true;const label=a.textContent;a.textContent="Sending…";
+  try{const r=await qbCall("/estimate",{method:"POST",json:{id:q&&q.id,syncToken:q&&q.syncToken,force:a.dataset.force==="1",customer:o.client,lines,memo:`From the Meter Testing App: ${o.client} · ${jobName(o)}${o.po?" · PO "+o.po:""}`}});
+    const n={...S.orders.get(o.id)};const now=Date.now();
+    n.qbo={id:r.id,docNumber:r.docNumber,syncToken:r.syncToken,lines:lines.length,sig:qbSig(lines),sentAt:q?q.sentAt:now,updatedAt:q?now:0,by};
+    if(!String(n.estimate||"").trim()&&r.docNumber)n.estimate=r.docNumber;
+    await put("orders",o.id,n);toast(q?`Estimate ${r.docNumber||r.id} updated in QuickBooks`:`Estimate ${r.docNumber||r.id} created in QuickBooks`);render()}
+  catch(e){a.disabled=false;a.textContent=label;
+    if(e.status===409&&e.data&&e.data.changed){a.dataset.force="1";a.textContent="Changed in QuickBooks. Click again to replace its lines";a.classList.add("armed");
+      toast("Someone changed this estimate in QuickBooks after it was sent. Updating will replace its lines with the app's list.")}
+    else toast("Couldn't send to QuickBooks: "+e.message)}}
+function viewQbo(){const st=QB.status,c=qbCfg(),r=route();
+  if(!QB.status&&!QB.loading&&!QB.err)setTimeout(loadQbStatus,0);
+  const msg={connected:["ok","QuickBooks is connected."],cancelled:["warn","The QuickBooks connection was cancelled."],expired:["warn","That connection attempt timed out. Click Connect again."],failed:["warn","QuickBooks didn't finish connecting. Click Connect again."]}[r.id];
+  const test=st&&st.env!=="production";
+  const statusHTML=!reqApi()?`<div class="callout warn">Set up the online service first (Limits &amp; lists → Customer request form).</div>`
+    :QB.err?`<div class="callout warn">Couldn't check QuickBooks: ${esc(QB.err)}</div>`
+    :!st?`<div class="note">Checking…</div>`
+    :st.connected?`<div>Connected to <b>${esc(st.company||"QuickBooks")}</b>${test?' <span class="jstat warn">Intuit test company</span>':""}. Connected ${st.connectedAt?fmtDay(st.connectedAt):""}${st.connectedBy?" by "+esc(st.connectedBy):""}.</div>
+       <div class="row"><button class="btn small" data-act="qb-connect">Reconnect</button><button class="btn small" data-act="qb-disconnect">Disconnect</button></div>
+       ${test?`<div class="note">This is Intuit's sample company with made-up data, for trying things out. When Intuit approves the production keys, Claude switches the service over and you click Reconnect to connect MAM's real QuickBooks.</div>`:""}`
+    :`<div>${st.needsReconnect?"QuickBooks needs to be reconnected (it hasn't been used for a long time, or access was removed in QuickBooks).":st.wrongEnv?"The service was switched to a different QuickBooks setup. Connect again.":"QuickBooks isn't connected."}</div>
+       <div class="row"><button class="btn primary" data-act="qb-connect">${st.needsReconnect||st.wrongEnv?"Reconnect":"Connect"} to QuickBooks</button></div>
+       <div class="note">You'll sign in to QuickBooks${test?" (Intuit's test company for now)":""} and approve the Meter Testing App. Only people signed in to this app can connect it.</div>`;
+  const on=st&&st.connected;const work=S.lists.workItems||DEFAULT_LISTS.workItems;
+  const opts=sel=>`<option value="">Not linked</option>`+c.items.map(i=>`<option value="${esc(i.id)}" ${String(sel)===String(i.id)?"selected":""}>${esc(i.name)}${i.type&&i.type!=="Service"?" ("+esc(i.type)+")":""}</option>`).join("");
+  return `<div class="stack" style="max-width:900px"><h1>QuickBooks</h1>
+    ${msg?`<div class="callout ${msg[0]==="ok"?"info":"warn"}">${msg[1]}</div>`:""}
+    <div class="panel"><div class="hd"><h2>Connection</h2></div><div class="bd stack">${statusHTML}</div></div>
+    ${on?`<div class="panel"><div class="hd"><h2>Work needed → QuickBooks items</h2><button class="btn small" data-act="qb-items">Reload items from QuickBooks</button></div><div class="bd stack">
+      <div class="note">Each Work needed checkbox becomes an estimate line with the QuickBooks item you pick here. ${c.items.length.toLocaleString()} items loaded${c.itemsAt?" "+fmtDay(c.itemsAt):""}.</div>
+      <table class="list" style="max-width:640px"><thead><tr><th>Checkbox</th><th>QuickBooks item</th></tr></thead><tbody>${work.map(w=>`<tr><td>${esc(w)}</td><td><select data-qbmap="${esc(w)}">${opts(c.map[w])}</select></td></tr>`).join("")}</tbody></table>
+      <div class="note">Parts are matched to QuickBooks items by name. <button class="linkbtn" data-act="qb-parts">Replace the Parts list with the QuickBooks items</button> so every part a tech can pick matches. ${(()=>{const names=new Set(c.items.map(i=>i.name.trim().toLowerCase()));const bad=(S.lists.parts||[]).filter(p=>!names.has(String(p).trim().toLowerCase()));return bad.length?`<b>${bad.length} part${bad.length===1?"":"s"} in the current list ${bad.length===1?"isn't a QuickBooks item":"aren't QuickBooks items"}:</b> ${esc(bad.slice(0,8).join(", "))}${bad.length>8?"…":""}`:"All parts in the list match QuickBooks items."})()}</div></div></div>
+    <div class="panel"><div class="hd"><h2>Customers</h2><button class="btn small" data-act="qb-customers">Update customers now</button></div><div class="bd stack">
+      <div class="note">The customer list (client names, contacts and addresses) now comes straight from QuickBooks and updates automatically once a day. ${QBO.state==="ready"?`${QBO.list.length.toLocaleString()} customers, last updated ${QBO.imported?new Date(QBO.imported).toLocaleString():""}${QBO.importedBy?" ("+esc(QBO.importedBy)+")":""}.`:""}</div></div></div>`:""}
+  </div>`}
+async function qbAction(act,a){
+  if(act==="qb-connect"){a.disabled=true;try{const j=await qbCall("/start",{method:"POST"});location.href=j.url}catch(e){a.disabled=false;toast("Couldn't start: "+e.message)}return true}
+  if(act==="qb-disconnect"){if(!confirmClick(a,"Click again to disconnect"))return true;a.disabled=true;try{await qbCall("/disconnect",{method:"POST"});qbCfg().connected=false;await saveQbCfg();QB.status=null;toast("QuickBooks disconnected")}catch(e){toast("Couldn't disconnect: "+e.message)}render();return true}
+  if(act==="qb-items"){a.disabled=true;a.textContent="Loading…";try{const n=await qbLoadItems();toast(`${n.toLocaleString()} QuickBooks items loaded`)}catch(e){toast("Couldn't load items: "+e.message)}render();return true}
+  if(act==="qb-parts"){const c=qbCfg();const parts=c.items.filter(i=>i.type!=="Service");const use=(parts.length?parts:c.items).map(i=>i.name);if(!use.length){toast("Load the QuickBooks items first.");return true}
+    if(!confirmClick(a,`Click again to replace the Parts list with ${use.length} QuickBooks items`))return true;
+    S.lists={...S.lists,parts:use};try{await putConfig("lists",{lists:S.lists});toast(`Parts list now has ${use.length} QuickBooks items`)}catch(e){toast("Couldn't save: "+e.message)}render();return true}
+  if(act==="qb-customers"){a.disabled=true;a.textContent="Updating…";try{const n=await syncQbCustomers(false);toast(`${n.toLocaleString()} customer${n===1?"":"s"} updated from QuickBooks`)}catch(e){toast("Couldn't update customers: "+e.message)}render();return true}
+  if(act==="qb-est"){const o=S.orders.get(a.dataset.id);if(o)await qbSendEstimate(o,a);return true}
+  return false}
 /* ---------- shipping ---------- */
 const DEFAULT_CARRIERS=[
   {name:"UPS",shipUrl:"https://www.ups.com/ship",trackUrl:"https://www.ups.com/track?tracknum={tracking}"},
@@ -1703,12 +1793,12 @@ function viewRequests(){
     <p class="muted" style="margin:0">Send customers a link to an online form instead of the paper Authorization Form. They enter their details once and list their meters; you turn the answers into a job with one click. This creates the request list in your SharePoint site.</p>
     <button class="btn primary" data-act="req-setup" style="align-self:flex-start">Set up customer requests</button></div></div>`;
   if(REQ.state!=="ready")return `<div class="empty">${REQ.state==="error"?"Couldn't load requests: "+esc(REQ.err):"Loading requests…"}</div>`;
-  const list=REQ.list.filter(r=>reqFilter==="all"||(reqFilter==="open"?["sent","submitted"].includes(r.status):r.status===reqFilter)).sort((a,b)=>(b.submittedAt||b.createdAt||0)-(a.submittedAt||a.createdAt||0));
+  const list=REQ.list.filter(r=>reqFilter==="all"||(reqFilter==="open"?["sent","submitted"].includes(r.status):reqFilter==="remind"?reqNeedsRemind(r):r.status===reqFilter)).sort((a,b)=>(b.submittedAt||b.createdAt||0)-(a.submittedAt||a.createdAt||0));
   return `<div class="stack">
-    <div class="row spread"><h1>Customer requests</h1><div class="row"><select id="req-filter" style="width:auto">${[["open","Open"],["submitted","Submitted"],["sent","Waiting for customer"],["converted","Job created"],["all","All"]].map(([v,t])=>`<option value="${v}" ${reqFilter===v?"selected":""}>${t}</option>`).join("")}</select><button class="btn primary" data-go="reqnew">New request</button></div></div>
+    <div class="row spread"><h1>Customer requests</h1><div class="row"><select id="req-filter" style="width:auto">${[["open","Open"],["submitted","Submitted"],["sent","Waiting for customer"],["remind","Needs a reminder"],["converted","Job created"],["all","All"]].map(([v,t])=>`<option value="${v}" ${reqFilter===v?"selected":""}>${t}</option>`).join("")}</select><button class="btn primary" data-go="reqnew">New request</button></div></div>
     ${reqApi()?"":`<div class="callout warn">The request form's online service isn't connected yet, so customers can't open the links. Finish the setup under <a href="#setup">Limits &amp; lists → Customer request form</a>. You can still create requests now.</div>`}
     <div class="panel"><div class="tablewrap"><table class="list"><thead><tr><th>Request</th><th>Customer</th><th>Contact</th><th>Status</th><th class="num">Meters</th><th>Sent</th><th>Submitted</th></tr></thead><tbody>
-    ${list.map(r=>`<tr class="click" data-go="req-${r.id}"><td class="mono">${reqRef(r)}</td><td><b>${esc(r.customer)}</b></td><td>${esc(r.contact)}<div class="note">${esc(r.email)}</div></td><td>${reqChip(r)}</td><td class="num">${r.submission?reqMeters(r):'<span class="muted">—</span>'}</td><td>${r.createdAt?fmtDay(r.createdAt):""}</td><td>${r.submittedAt?fmtDay(r.submittedAt):'<span class="muted">—</span>'}</td></tr>`).join("")||`<tr><td colspan="7"><div class="empty">No requests here. Choose <b>New request</b> when a customer wants to send meters.</div></td></tr>`}
+    ${list.map(r=>`<tr class="click" data-go="req-${r.id}"><td class="mono">${reqRef(r)}</td><td><b>${esc(r.customer)}</b></td><td>${esc(r.contact)}<div class="note">${esc(r.email)}</div></td><td>${reqChip(r)}${reqNeedsRemind(r)?`<div><span class="jstat warn">No reply · ${reqQuietDays(r)} days</span></div>`:""}</td><td class="num">${r.submission?reqMeters(r):'<span class="muted">—</span>'}</td><td>${r.createdAt?fmtDay(r.createdAt):""}</td><td>${r.submittedAt?fmtDay(r.submittedAt):'<span class="muted">—</span>'}</td></tr>`).join("")||`<tr><td colspan="7"><div class="empty">No requests here. Choose <b>New request</b> when a customer wants to send meters.</div></td></tr>`}
     </tbody></table></div></div></div>`;
 }
 function viewReqNew(){
@@ -1749,7 +1839,9 @@ function viewReq(id){
       <div class="row">${r.status==="submitted"?`<button class="btn primary" data-act="req-job" data-id="${r.id}">Create job</button>`:""}${job?`<a class="btn" href="#job-${job.id}">Open the job</a>`:""}</div></div></div>
     ${["sent","submitted"].includes(r.status)?`<div class="panel"><div class="hd"><h2>Link for ${esc(r.contact||r.customer)}</h2><span class="note">${expired?"Expired":"Works until"} ${r.expires?fmtDay(r.expires):""}</span></div><div class="bd stack">
       <div class="row" style="flex-wrap:nowrap"><input id="rq-link" readonly value="${esc(link)}" class="mono" style="flex:1;min-width:0" aria-label="Link for the customer"><button class="btn" data-act="req-copy">Copy link</button></div>
-      <div class="row"><button class="btn ${r.sentAt?"":"primary"}" data-act="req-mail-open">${r.sentAt?"Email the link again":"Email the link"}</button>${expired?`<button class="btn" data-act="req-extend">Extend ${REQ_DAYS} days</button>`:`<button class="btn small" data-act="req-extend">Extend ${REQ_DAYS} days</button>`}<button class="btn small" data-act="req-cancel">Cancel request</button></div>
+      <div class="row"><button class="btn ${r.sentAt?"":"primary"}" data-act="req-mail-open">${r.sentAt?"Email the link again":"Email the link"}</button>${expired?`<button class="btn" data-act="req-extend">Extend ${REQ_DAYS} days</button>`:`<button class="btn small" data-act="req-extend">Extend ${REQ_DAYS} days</button>`}${r.status==="sent"&&r.sentAt?`<button class="btn ${reqNeedsRemind(r)?"primary":"small"}" data-act="req-remind-open">Send a reminder</button>`:""}<button class="btn small" data-act="req-cancel">Cancel request</button></div>
+      ${(r.reminders||[]).length?`<div class="note">Reminder${r.reminders.length>1?"s":""} sent: ${r.reminders.map(x=>`${fmtDay(x.at)}${x.by?" by "+esc(x.by):""}`).join("; ")}.</div>`:""}
+      ${reqNeedsRemind(r)?`<div class="callout warn">No reply in ${reqQuietDays(r)} days. Send a reminder, or call ${esc(r.contact||"the customer")}${r.phone?" at "+esc(r.phone):""}.</div>`:""}
       ${r.sentAt?`<div class="note">Emailed to ${esc(r.sentTo||r.email)} on ${fmtDay(r.sentAt)} ${fmtTime(r.sentAt)}${r.sentBy?" by "+esc(r.sentBy):""}.</div>`:`<div class="note">Email it from shop@ here, or copy the link into your own Outlook email.</div>`}
       ${reqApi()?"":`<div class="callout warn">Customers can't open the link until the request form service is connected (Limits &amp; lists → Customer request form).</div>`}
       ${reqMail?reqMailBox(r):""}
@@ -1770,6 +1862,12 @@ function reqMailBox(r){const m=reqMail;
 function reqMailDraft(r){const first=String(r.contact||"").trim().split(/\s+/)[0];
   return {id:r.id,to:r.email||"",subject:"Sending meters to Mid America Meter for testing",
     body:`Hi ${first||"there"},\n\nThanks for choosing Mid America Meter. Please use this link to tell us about the meters you're sending. You enter your details once and list each kind of meter, with a quantity for identical meters:\n\n${reqLink(r)}\n\nWhen you send the form, you'll get our shipping address and a packing slip to put in the box. You can use the same link to make changes until we receive your meters. The link works until ${fmtDay(r.expires)}.\n\nThanks,\n${S.myTech||(account&&account.name)||"Mid America Meter"}\nMid America Meter, Inc.\n763-478-8041`}}
+const REMIND_DAYS=7;
+function reqQuietDays(r){if(r.status!=="sent"||(r.expires&&Date.now()>r.expires))return 0;const from=r.remindedAt||r.sentAt||r.createdAt||Date.now();return Math.floor((Date.now()-from)/864e5)}
+const reqNeedsRemind=r=>reqQuietDays(r)>=REMIND_DAYS;
+function reqRemindDraft(r){const first=String(r.contact||"").trim().split(/\s+/)[0];
+  return {id:r.id,kind:"reminder",to:r.email||"",subject:"Reminder: tell us about the meters you're sending",
+    body:`Hi ${first||"there"},\n\nJust a reminder: when you're ready to send meters to Mid America Meter for testing, please fill out this short form first so we can get them tested quickly when they arrive:\n\n${reqLink(r)}\n\nIt only takes a few minutes, and you'll get our shipping address and a packing slip for the box. The link works until ${fmtDay(r.expires)}. If your plans have changed, just let us know.\n\nThanks,\n${S.myTech||(account&&account.name)||"Mid America Meter"}\nMid America Meter, Inc.\n763-478-8041`}}
 const REQ_TYPE={"Displacement (disk/piston)":"Displacement","Single-jet":"Singlejet","Multi-jet":"Multi-jet","Turbine":"Turbine","Propeller":"Propeller","Compound":"Compound","Electromagnetic":"Electromagnetic","Ultrasonic":"Ultrasonic"};
 async function reqCreateJob(r,btn){
   const s=r.submission;if(!s)return;const total=reqMeters(r);
@@ -1828,10 +1926,12 @@ async function reqAction(act,a){
   const r=cur();if(!r&&!["req-save-settings","req-grant","req-test"].includes(act))return false;
   if(act==="req-copy"){const ok=await copyText(reqLink(r));toast(ok?"Link copied. Paste it into your email.":"Couldn't copy. Select the link and copy it.");return true}
   if(act==="req-mail-open"){reqMail=reqMailDraft(r);render();const f=$("#rqm-body");if(f)f.focus();return true}
+  if(act==="req-remind-open"){reqMail=reqRemindDraft(r);render();const f=$("#rqm-body");if(f)f.focus();return true}
   if(act==="req-mail-cancel"){reqMail=null;render();return true}
   if(act==="req-mail-send"){const m=reqMail;const to=String(m.to||"").split(/[,;\s]+/).filter(x=>/@/.test(x));if(!to.length){toast("Enter an email address.");return true}
     a.disabled=true;a.textContent="Sending…";
-    try{await Store.sendMail({from:emailCfg("shopEmail"),to,cc:[],subject:m.subject,body:m.body,attachments:[]});await saveReq(r,{sentAt:Date.now(),sentTo:to.join(", "),sentBy:by});reqMail=null;toast("Link emailed to "+to.join(", "))}
+    try{await Store.sendMail({from:emailCfg("shopEmail"),to,cc:[],subject:m.subject,body:m.body,attachments:[]});if(m.kind==="reminder"){const now=Date.now();await saveReq(r,{remindedAt:now,reminders:[...(r.reminders||[]),{at:now,by,to:to.join(", ")}]});reqMail=null;toast("Reminder emailed to "+to.join(", "))}
+    else{await saveReq(r,{sentAt:Date.now(),sentTo:to.join(", "),sentBy:by});reqMail=null;toast("Link emailed to "+to.join(", "))}}
     catch(err){toast("Couldn't send: "+err.message);a.disabled=false;a.textContent="Send"}render();return true}
   if(act==="req-extend"){try{await saveReq(r,{expires:Date.now()+REQ_DAYS*864e5});toast(`The link now works until ${fmtDay(Date.now()+REQ_DAYS*864e5)}`)}catch(err){toast("Couldn't save: "+err.message)}render();return true}
   if(act==="req-cancel"){if(!confirmClick(a,"Click again to cancel"))return true;try{await saveReq(r,{status:"cancelled",cancelledAt:Date.now(),cancelledBy:by});toast("Request cancelled. The link no longer works.")}catch(err){toast("Couldn't save: "+err.message)}render();return true}
@@ -2166,6 +2266,7 @@ function emailSettingsPanel(){
       <div class="note">These words are filled in for each email: <span class="mono">{client} {estimate} {po} {workorders} {meters} {count} {tracking}</span>. {tracking} becomes the carrier and tracking link once the job is marked shipped, and is left out otherwise. Techs can still edit each email before sending.</div>
       <div class="row"><button class="btn small" data-act="email-default">Restore the default wording</button></div>
     </div></div>
+  <div class="panel"><div class="hd"><h2>QuickBooks</h2><a class="btn small primary" href="#qbo">Open QuickBooks settings</a></div><div class="bd note">${qbOn()?`Connected${qbCfg().company?" to "+esc(qbCfg().company):""}. Estimates are created from each job's Work needed list, and customers update from QuickBooks daily.`:"Connect QuickBooks Online to create estimates from the Work needed list and keep the customer list up to date automatically."}</div></div>
   <div class="panel"><div class="hd"><h2>Customers from QuickBooks</h2></div><div class="bd stack">
     <div>${QBO.state==="ready"?`${QBO.list.length.toLocaleString()} customers. Imported ${QBO.imported?new Date(QBO.imported).toLocaleString():""}${QBO.importedBy?" by "+esc(QBO.importedBy):""}.`:QBO.state==="none"?"Not imported yet.":QBO.state==="error"?"Couldn't load: "+esc(QBO.err||""):"Loading…"}</div>
     <label class="btn small" style="align-self:flex-start">Import customer list<input type="file" id="qbo-file" accept=".xlsx,.xls,.csv" hidden></label>
