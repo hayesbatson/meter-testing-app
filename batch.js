@@ -213,7 +213,7 @@ function viewJob(){
   const tot=(rows.length+x)||1;const o=j.opts;const openRuns=j.runs.filter(r=>!runDone(r));
   const opt=(k,label,choices)=>`<label class="f">${label}<select id="op-${k}" data-op="${k}">${choices.map(([v,t])=>`<option value="${v}" ${String(o[k])===String(v)?"selected":""}>${t}</option>`).join("")}</select></label>`;
   const stat=(cls,n,label,hint)=>`<div class="stat ${cls}"><b>${n}</b><span>${label}</span><div class="note" style="margin-top:4px">${hint}</div></div>`;
-  return `<div class="stack">${jobHead()}${mfPicker()}
+  return `<div class="stack">${jobHead()}${xlPanel()}${mfPicker()}
    <div class="panel"><div class="hd"><h2>Progress</h2><div class="row"><a class="btn" href="#batch-${B.oid}.run">Go to bench run</a><button class="btn ${j.approved?"":"primary"}" data-act="b-approve">${j.approved?"Undo approval":"Approve job"}</button></div></div><div class="bd stack">
     <div class="stats">
       ${stat("",rows.length+x,"Meters entered","Serials typed in so far, including locked-up meters")}
@@ -460,6 +460,68 @@ async function mfSave(btn){const m=B.mf,j=J();if(!m)return;btn.disabled=true;btn
   catch(e){toast("Couldn't save the manifest: "+e.message);btn.disabled=false;btn.textContent="Save manifest and use it for this job"}
   render()}
 
+
+/* ---------- import a job already in progress from the techs' Excel sheet (the batch template) ---------- */
+const SIZE_FROM_SHEET=x=>{const k=String(x||"").replace(/["”″\s]/g,"").toLowerCase();return Object.keys(SIZES).find(z=>z.replace(/["\s]/g,"").toLowerCase()===k)||(k==="5/8x5/8"?'5/8"':"")};
+const UNIT_FROM_SHEET=x=>/cu|cf|ft/i.test(String(x||""))?"CF":String(x||"").trim()?"Gallons":"";
+const DATE_FROM_SHEET=x=>{const m=String(x||"").match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);if(!m)return /^\d{4}-\d\d-\d\d$/.test(String(x))?String(x):"";const y=m[3].length===2?"20"+m[3]:m[3];return `${y}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`};
+async function xlRead(file){if(!window.XLSX)throw new Error("The Excel tool didn't load. Reload the page and try again.");
+  const wb=XLSX.read(await file.arrayBuffer(),{type:"array"});let sheet=null,rows=null,h=-1;
+  for(const n of wb.SheetNames){const r=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:"",raw:false});const i=r.findIndex(x=>/^serial/i.test(String(x[0]||"").trim())&&x.some(c=>/beg read/i.test(String(c))));if(i>=0){sheet=n;rows=r;h=i;break}}
+  if(!rows)throw new Error("Couldn't find the results sheet (a header row starting with Serial # and with Beg Read columns).");
+  const head=rows[h].map(c=>String(c||"").trim().toLowerCase());const all=re=>head.map((c,i)=>re.test(c)?i:-1).filter(i=>i>=0);
+  const flow=all(/^flow rate$/).slice(-3),beg=all(/^beg read$/),end=all(/^end read$/),vol=all(/^test volume$/);
+  const C={ser:0,size:head.indexOf("size"),make:head.indexOf("make"),model:head.indexOf("model"),unit:head.indexOf("volume"),date:head.indexOf("test date"),op:head.indexOf("operator"),
+    arrive:head.indexOf("beginning"),notes:head.indexOf("notes"),flow,beg,end,vol};
+  if(beg.length<3||end.length<3||vol.length<3)throw new Error("The sheet doesn't have the three test blocks (Beg Read, End Read, Test Volume).");
+  const data=rows.slice(h+1).filter(r=>String(r[0]||"").trim());
+  /* the client's serial list, if the workbook has one */
+  let manifest=null;for(const n of wb.SheetNames){if(n===sheet)continue;const r=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:"",raw:false});const i=r.findIndex(x=>x.some(c=>/serial/i.test(String(c))));
+    if(i<0)continue;const hd=r[i].map(c=>String(c||"").trim());const si=hd.findIndex(c=>/serial/i.test(c));let ri=hd.findIndex(c=>/read/i.test(c));
+    if(ri<0){const cnt=hd.map((_,ci)=>r.slice(i+1,i+40).filter(x=>num(x[ci])!=null).length);ri=cnt.findIndex((c,ci)=>ci!==si&&c>20)}
+    manifest={sheet:n,rows:r.slice(i+1).map(x=>({ser:String(x[si]||"").trim(),read:ri>=0?num(x[ri]):null})).filter(x=>x.ser)};break}
+  const ops=[...new Set(data.map(r=>String(r[C.op]||"").trim()).filter(Boolean))];
+  const techs=TECHS();const guess=o=>techs.find(t=>t.toLowerCase()===o.toLowerCase())||techs.find(t=>t[0]&&t[0].toLowerCase()===o[0].toLowerCase()&&ops.filter(x=>x[0]===o[0]).length===1)||"";
+  B.xl={file,sheet,C,data,manifest,ops,map:Object.fromEntries(ops.map(o=>[o,guess(o)]))}}
+function xlBuild(){const {C,data,map}=B.xl;const v=i=>r=>String(r[i]==null?"":r[i]).trim();const runs=[],blocked=[];let cur=null,key="";
+  data.forEach(r=>{const g=k=>v(C[k])(r);const reads=[...C.beg,...C.end].some(i=>v(i)(r));
+    if(!reads){if(/lock|stuck|frozen|seized|no reg|could not|couldn.t/i.test(g("notes"))||!g("arrive")){blocked.push({ser:g("ser"),wo:"",arrive:g("arrive"),run:null,pos:null,date:DATE_FROM_SHEET(g("date"))||today(),tech:map[g("op")]||g("op"),by:ME(),note:g("notes")});return}}
+    const size=SIZE_FROM_SHEET(g("size")),date=DATE_FROM_SHEET(g("date")),tech=map[g("op")]||g("op");
+    const vols=C.vol.map(i=>v(i)(r)),flows=C.flow.map(i=>v(i)(r).replace(/^\./,"0."));
+    const k=[date,tech,size,g("make"),g("model"),g("unit"),vols.join("|"),flows.join("|")].join("~");
+    if(!cur||k!==key||cur.rows.length>=posFor(size)){cur=blankRun(runs.length+1,0);Object.assign(cur,{date,tech,size,make:g("make"),model:g("model"),unit:UNIT_FROM_SHEET(g("unit")),flow:flows,vol:vols,saved:true,rows:[],imported:true});runs.push(cur);key=k}
+    const [b1,b2,b3]=C.beg.map(i=>v(i)(r)),[e1,e2,e3]=C.end.map(i=>v(i)(r));
+    const row={...emptyRow(),ser:g("ser"),arrive:g("arrive"),b1,e1,b2:b2&&b2!==e1?b2:"",e2,b3:b3&&b3!==e2?b3:"",e3};if(g("notes"))row.note=g("notes");cur.rows.push(row)});
+  runs.forEach(run=>{while(run.rows.length<posFor(run.size))run.rows.push(emptyRow());if(runDone(run))run.wasDone=true});
+  return {runs,blocked}}
+function xlPanel(){const x=B.xl,j=J();
+  if(!x){const empty=!j.runs.some(r=>r.rows.some(y=>y.ser.trim()))&&!j.blocked.length;if(!empty||j.approved)return "";
+    return `<div class="panel"><div class="hd"><h2>Moving a job that's already in progress?</h2><label class="btn small">Import the techs' Excel sheet<input type="file" id="xl-up" accept=".xlsx,.xlsm,.xls" hidden></label></div><div class="bd note">Choose the batch testing workbook the techs have been filling in (like Keystone_Aqua Batch 4.xlsx). The app reads every tested meter into bench runs, adds the client's serial list as this job's manifest, and gives each meter a work order number. Nothing is saved until you check the preview and click Import.</div></div>`}
+  const {runs,blocked}=xlBuild();const meters=runs.reduce((s,r)=>s+r.rows.filter(y=>y.ser).length,0);const done=runs.filter(runDone).length;
+  const dates=runs.map(r=>r.date).filter(Boolean).sort();const fails=runs.reduce((s,r)=>s+r.rows.filter(y=>y.ser&&calc(y,r).overall==="fail").length,0);
+  const unmapped=x.ops.filter(o=>!x.map[o]);const sizes=[...new Set(x.data.map(r=>String(r[x.C.size]||"").trim()))].filter(z=>!SIZE_FROM_SHEET(z));
+  return `<div class="panel" style="border-color:var(--accent)"><div class="hd"><h2>Import ${esc(x.file.name)}</h2></div><div class="bd stack">
+    <div class="stats"><div class="stat"><b>${meters.toLocaleString()}</b><span>Meters tested</span></div><div class="stat"><b>${runs.length}</b><span>Bench runs</span></div><div class="stat fail"><b>${fails}</b><span>Fail</span></div><div class="stat"><b>${blocked.length}</b><span>Untested (locked up)</span></div><div class="stat"><b>${x.manifest?x.manifest.rows.length.toLocaleString():"—"}</b><span>Serials in the client list</span></div></div>
+    <div class="note">Tested ${dates.length?esc(dayLbl(dates[0]))+" to "+esc(dayLbl(dates[dates.length-1])):""}. Rows are grouped into bench runs the way they were tested: same date, tech, size and test volumes, up to ${posFor(runs[0]&&runs[0].size)} meters per run. ${done<runs.length?`<b>${runs.length-done} run${runs.length-done>1?"s are":" is"} not complete</b> (missing reads); finish ${runs.length-done>1?"them":"it"} on the Bench run screen.`:"Every run is complete."}${x.manifest?` The serial list from the “${esc(x.manifest.sheet)}” sheet becomes this job's manifest.`:""}</div>
+    <div class="grid g3">${x.ops.map(o=>`<label class="f">Operator “${esc(o)}” is<select data-xlop="${esc(o)}"><option value="">Choose the tech…</option>${TECHS().map(t=>`<option ${x.map[o]===t?"selected":""}>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>
+    ${sizes.length?`<div class="callout warn">Unknown size${sizes.length>1?"s":""} in the sheet: ${esc(sizes.join(", "))}. Those runs will need the size picked on the Bench run screen.</div>`:""}
+    <div class="note">Each meter gets the next work order number, ${meters+blocked.length} in all, the same as if it had been entered here. The workbook itself isn't changed.</div>
+    <div class="row"><button class="btn primary" data-act="b-xl-go" ${unmapped.length?"disabled":""}>Import ${meters.toLocaleString()} meters</button><button class="btn" data-act="b-xl-cancel">Cancel</button>${unmapped.length?`<span class="note">Choose the tech for ${esc(unmapped.join(", "))} first.</span>`:""}</div></div></div>`}
+async function xlImport(btn){const x=B.xl,j=J();const {runs,blocked}=xlBuild();btn.disabled=true;const say=t=>{btn.textContent=t};
+  try{
+    say("Numbering meters…");const n=runs.reduce((s,r)=>s+r.rows.filter(y=>y.ser).length,0)+blocked.length;const wos=await reserveWos(n);let k=0;
+    runs.forEach(r=>r.rows.forEach(y=>{if(y.ser)y.wo=wos[k++]}));blocked.forEach(b=>b.wo=wos[k++]);
+    if(x.manifest&&x.manifest.rows.length){say("Saving the client's serial list…");const id="m"+Date.now().toString(36);const dir=`customers/${safe(j.client)}/manifests`;
+      await Store.putFile(`${dir}/${id}-${safe(x.file.name)}`,x.file);await Store.putJsonIf(`${dir}/${id}.json`,{name:x.file.name+" ("+x.manifest.sheet+")",cols:{ser:0,read:1},rows:x.manifest.rows},null);
+      const meta={id,name:`${x.file.name} (${x.manifest.sheet})`,orig:`${dir}/${id}-${safe(x.file.name)}`,n:x.manifest.rows.length,by:ME(),at:today(),reads:x.manifest.rows.some(r=>r.read!=null)};
+      const cr=custRec(j.client);cr.manifests=[...(cr.manifests||[]),meta];await putConfig("batchCust",{cust:S.batchCust});
+      await saveJob(d=>{d.manifests=d.manifests||[];d.manifests.push(meta)})}
+    const nb=blockOf(runs.length);for(let b=1;b<=nb;b++){say(`Saving runs (${b} of ${nb})…`);const part=runs.filter(r=>blockOf(r.no)===b);await updateJson(blockPath(b),()=>({runs:part}),{runs:[]})}
+    const dates=runs.map(r=>r.date).filter(Boolean).sort();
+    await saveJob(d=>{d.blocks=nb;d.blocked=[...(d.blocked||[]),...blocked];d.imported={file:x.file.name,at:Date.now(),by:ME(),meters:n};if(dates[0]&&d.sched)d.sched.start=dates[0]});
+    B.xl=null;toast(`${n.toLocaleString()} meters imported in ${runs.length} runs.`);B.state="idle";render()}
+  catch(e){btn.disabled=false;say("Try the import again");toast("The import stopped: "+e.message)}}
+
 /* ---------- client file download (Excel, formats like the clients' sheets) ---------- */
 function downloadFile(){const j=J(),o=j.opts;if(!window.XLSX){toast("The Excel tool didn't load. Reload and try again.");return}
   const tb=["Flow Rate","AWWA Low","AWWA High","Beg Read","End Read","Test Volume","Accuracy",...(o.pf?["Pass/Fail"]:[])];
@@ -515,6 +577,8 @@ document.addEventListener("input",e=>{const t=e.target;if(!inBatch(t)||!B.view)r
 document.addEventListener("change",async e=>{const t=e.target;if(!inBatch(t)||!B.view)return;e.stopPropagation();const j=J(),run=R();
   if(t.dataset.bphoto){const f=t.files[0];t.value="";if(!f)return;const [ri,pi]=t.dataset.bphoto.split("|").map(Number);const rn=j.runs[ri],row=rn.rows[pi];
     toast("Saving the photo…");try{await addPhoto(f,row,rn,pi);B.qrFor="";toast(`Photo saved to the job for ${row.ser}.`)}catch(err){toast("Couldn't save the photo: "+err.message)}render();return}
+  if(t.id==="xl-up"){const f=t.files[0];t.value="";if(!f)return;toast("Reading the workbook…");try{await xlRead(f)}catch(err){toast("Couldn't read that file: "+err.message)}render();window.scrollTo(0,0);return}
+  if(t.dataset.xlop!==undefined){B.xl.map[t.dataset.xlop]=t.value;render();return}
   if(t.id==="mf-up"){const f=t.files[0];t.value="";if(!f)return;try{await mfRead(f)}catch(err){toast("Couldn't read that file: "+err.message)}render();window.scrollTo(0,0);return}
   if(t.dataset.mfc){B.mf.cols[t.dataset.mfc]=+t.value;render();return}
   if(t.dataset.sc){j.sched[t.dataset.sc]=t.value;render();saveSched();return}
@@ -585,6 +649,8 @@ document.addEventListener("click",async e=>{const a=e.target.closest("[data-act]
   if(act==="sc-reset"){j.sched.edits={};render();saveSched();toast("Your changes are cleared. The plan is back to full days.");return}
   if(act==="sc-manifest"){const z=j.sched.sizes[j.sched.manifestSize];if(z)z.meters=null;render();saveSched();return}
   if(act==="sc-clear"){Object.keys(j.sched.edits).forEach(k=>{if(k.startsWith(a.dataset.date+"|"))delete j.sched.edits[k]});render();saveSched();return}
+  if(act==="xl-cancel"){B.xl=null;render();return}
+  if(act==="xl-go"){await xlImport(a);return}
   if(act==="mf-cancel"){B.mf=null;render();return}
   if(act==="mf-save"){await mfSave(a);return}
   if(act==="mf-dl"){const f=j.files[+a.dataset.i];try{const r=await Store.getFile(f.orig);offer(f.name,await r.blob())}catch(err){toast("Couldn't download: "+err.message)}return}
