@@ -575,7 +575,7 @@ function workHTML(m){const w=m.work,items=S.lists.workItems||DEFAULT_LISTS.workI
       <label class="f" style="max-width:90px">Qty<input id="wp-qty" class="num" inputmode="numeric" value="1"></label><button type="button" class="btn small" data-act="part-add">Add part</button></div></div>`}
 function workSummary(ms){const tot=new Map();const add=(k,q)=>tot.set(k,(tot.get(k)||0)+q);
   ms.forEach(m=>{const w=(m.work&&typeof m.work==="object")?m.work:{items:[],parts:[]};(w.items||[]).forEach(it=>add(it,1));(w.parts||[]).forEach(p=>add(p.name,num(p.qty)||1))});return tot}
-function workPanel(o,ms){const tot=workSummary(ms);if(!tot.size)return "";
+function workPanel(o,ms){const tot=workSummary(ms);if(!tot.size)return qbOn()?`<div class="panel"><div class="hd"><h2>QuickBooks estimate</h2></div><div class="bd note">Nothing to send yet. Open a meter and tick its <b>Work needed</b> boxes (or add parts), then come back here to create the estimate in QuickBooks.</div></div>`:"";
   const per=ms.filter(m=>m.work&&((m.work.items||[]).length||(m.work.parts||[]).length));
   return `<div class="panel"><div class="hd"><h2>Work needed (for the estimate)</h2><button class="btn small" data-act="work-copy" data-id="${o.id}">Copy list</button></div>
     <div class="bd grid g2" style="align-items:start"><div><div class="note" style="margin-bottom:6px">Totals for the job</div><table class="list"><thead><tr><th>Item</th><th class="num">Qty</th></tr></thead><tbody>${[...tot].map(([k,q])=>`<tr><td>${esc(k)}</td><td class="num">${q}</td></tr>`).join("")}</tbody></table></div>
@@ -1172,7 +1172,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.12.1";
+const APP_VERSION="1.12.2";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
