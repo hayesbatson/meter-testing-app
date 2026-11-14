@@ -423,7 +423,7 @@ function photoCell(row,ri,pi,lock){const j=J();const need=photoCodes(row),have=p
     ${have.length?`<span class="flag ok">Photo saved to the job</span>`:`<span class="flag warn">Take a photo of the ${need.some(n=>/Serial/.test(n))?"serial plate":"register"} so the office can check it</span>`}`}
 async function addPhoto(file,row,run,pi){const j=J();const id="ph"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   const path=`batch/${B.oid}/photos/WO${safe(row.wo)}_${safe(row.ser)}_${id}.jpg`;
-  const blob=window.shrinkImage?await shrinkImage(file):file;const it=await Store.putFile(path,blob);
+  const blob=typeof shrink==="function"?await shrink(file):file;const it=await Store.putFile(path,blob);
   const ph={id:it.id||id,path,ser:row.ser,wo:row.wo,run:run.no,pos:pi+1,reason:photoCodes(row).join("; ")||"Photo",by:ME(),at:new Date().toISOString()};
   try{B.photoUrls[ph.id]=URL.createObjectURL(blob)}catch(e){}
   await saveJob(d=>{d.photos=d.photos||[];d.photos.push(ph)});return ph}
