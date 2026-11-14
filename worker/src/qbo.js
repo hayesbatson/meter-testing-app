@@ -2,9 +2,15 @@
    Only signed-in MAM staff can use it: every call carries the user's Microsoft token, which is checked with Microsoft.
    QuickBooks tokens are stored encrypted in the SharePoint list "MTA Config" (item "qbo-connection"). */
 
-const AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
-const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
-const REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke";
+/* OAuth endpoints come from Intuit's discovery document (fallbacks used only if it can't be read) */
+const FALLBACK = { authorization_endpoint: "https://appcenter.intuit.com/connect/oauth2", token_endpoint: "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer", revocation_endpoint: "https://developer.api.intuit.com/v2/oauth2/tokens/revoke" };
+let disco = null;
+async function endpoints(env) {
+  if (disco && disco.at > Date.now() - 24 * 3600e3) return disco;
+  const u = env.QBO_ENV === "production" ? "https://developer.api.intuit.com/.well-known/openid_configuration" : "https://developer.api.intuit.com/.well-known/openid_sandbox_configuration";
+  try { const r = await fetch(u, { headers: { Accept: "application/json" } }); if (r.ok) { const j = await r.json(); if (j.token_endpoint) { disco = { ...FALLBACK, ...j, at: Date.now() }; return disco; } } } catch (e) {}
+  return disco || { ...FALLBACK, at: 0 };
+}
 const SCOPE = "com.intuit.quickbooks.accounting";
 const MINOR = "75";
 const CONN_KEY = "qbo-connection";
@@ -83,7 +89,7 @@ async function deleteConn(env, g) {
 
 /* ---------- Intuit tokens ---------- */
 async function tokenCall(env, params) {
-  const r = await fetch(TOKEN_URL, {
+  const r = await fetch((await endpoints(env)).token_endpoint, {
     method: "POST",
     headers: { Authorization: "Basic " + btoa(env.QBO_CLIENT_ID + ":" + env.QBO_CLIENT_SECRET), "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body: new URLSearchParams(params),
@@ -93,13 +99,13 @@ async function tokenCall(env, params) {
   return { access: j.access_token, accessExp: Date.now() + (j.expires_in || 3600) * 1000, refresh: j.refresh_token, refreshExp: Date.now() + (j.x_refresh_token_expires_in || 8640000) * 1000 };
 }
 let memConn = null; // this worker instance's copy, so one call doesn't re-read SharePoint every time
-async function getConn(env, g, fresh) {
+async function getConn(env, g, fresh, forceRefresh) {
   if (!memConn || fresh) memConn = await readConn(env, g);
   const c = memConn;
   if (!c) return null;
-  if (Date.now() > c.tokens.accessExp - 120_000) {
+  if (forceRefresh || Date.now() > c.tokens.accessExp - 120_000) {
     const latest = await readConn(env, g); // another instance may have refreshed already (refresh tokens rotate)
-    if (latest && latest.tokens.accessExp - 120_000 > Date.now()) { memConn = latest; return latest; }
+    if (latest && !forceRefresh && latest.tokens.accessExp - 120_000 > Date.now()) { memConn = latest; return latest; }
     try {
       const t = await tokenCall(env, { grant_type: "refresh_token", refresh_token: (latest || c).tokens.refresh });
       memConn = { ...(latest || c), tokens: t, refreshedAt: Date.now() };
@@ -113,8 +119,8 @@ async function getConn(env, g, fresh) {
 }
 
 /* ---------- QuickBooks API ---------- */
-async function qb(env, g, path, opt = {}) {
-  const c = await getConn(env, g);
+async function qb(env, g, path, opt = {}, retried) {
+  const c = await getConn(env, g, false, !!retried);
   if (!c) { const e = new Error("QuickBooks isn't connected yet."); e.status = 409; throw e; }
   const sep = path.includes("?") ? "&" : "?";
   const r = await fetch(`${apiBase(env)}/v3/company/${c.realmId}${path}${sep}minorversion=${MINOR}`, {
@@ -122,6 +128,7 @@ async function qb(env, g, path, opt = {}) {
     headers: { Authorization: "Bearer " + c.tokens.access, Accept: "application/json", ...(opt.json ? { "Content-Type": "application/json" } : {}) },
     body: opt.json ? JSON.stringify(opt.json) : undefined,
   });
+  if (r.status === 401 && !retried) return qb(env, g, path, opt, true); // access token rejected early: refresh once and retry
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const f = j.Fault && j.Fault.Error && j.Fault.Error[0];
@@ -201,7 +208,7 @@ export async function handleQbo(req, env, g, url, json) {
       const exp = String(Date.now() + 15 * 60_000), nonce = b64url(crypto.getRandomValues(new Uint8Array(12))), who = encodeURIComponent(user.name).replace(/\./g, "%2E");
       const state = `${exp}.${nonce}.${who}.${await hmac(env, `${exp}.${nonce}.${who}`)}`;
       const q = new URLSearchParams({ client_id: env.QBO_CLIENT_ID, response_type: "code", scope: SCOPE, redirect_uri: env.QBO_REDIRECT, state });
-      return json({ url: `${AUTH_URL}?${q}` });
+      return json({ url: `${(await endpoints(env)).authorization_endpoint}?${q}` });
     }
     if (path === "/status" && req.method === "GET") {
       const c = await readConn(env, g); memConn = c;
@@ -214,7 +221,7 @@ export async function handleQbo(req, env, g, url, json) {
     if (path === "/disconnect" && req.method === "POST") {
       const c = await readConn(env, g);
       if (c) {
-        await fetch(REVOKE_URL, { method: "POST", headers: { Authorization: "Basic " + btoa(env.QBO_CLIENT_ID + ":" + env.QBO_CLIENT_SECRET), "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ token: c.tokens.refresh }) }).catch(() => {});
+        await fetch((await endpoints(env)).revocation_endpoint, { method: "POST", headers: { Authorization: "Basic " + btoa(env.QBO_CLIENT_ID + ":" + env.QBO_CLIENT_SECRET), "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ token: c.tokens.refresh }) }).catch(() => {});
         await deleteConn(env, g);
       }
       memConn = null;
