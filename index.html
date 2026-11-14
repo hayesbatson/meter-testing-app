@@ -1172,7 +1172,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.12.0";
+const APP_VERSION="1.12.1";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1617,19 +1617,20 @@ async function qbCall(path,opt={}){const api=reqApi();if(!api)throw new Error("T
 async function saveQbCfg(){await putConfig("qbo",qbCfg())}
 async function loadQbStatus(){if(QB.loading||!reqApi())return;QB.loading=true;QB.err="";
   try{QB.status=await qbCall("/status");const c=qbCfg();const on=!!QB.status.connected;
-    if(c.connected!==on){c.connected=on;c.company=QB.status.company||"";await saveQbCfg().catch(()=>{})}
+    const env=QB.status.env||"sandbox";if(c.connected!==on||c.env!==env){c.connected=on;c.env=env;c.company=QB.status.company||"";await saveQbCfg().catch(()=>{})}
     if(on&&!c.items.length)await qbLoadItems().catch(()=>{})}
   catch(e){QB.err=e.message}
   QB.loading=false;softRender()}
 async function qbLoadItems(){const j=await qbCall("/items");const c=qbCfg();c.items=j.items.map(i=>({id:i.id,name:i.name,type:i.type}));c.itemsAt=Date.now();await saveQbCfg();return c.items.length}
 async function syncQbCustomers(auto){
   const j=await qbCall("/customers");if(!j.customers||!j.customers.length)throw new Error("QuickBooks returned no customers.");
+  if(qbCfg().env!=="production")throw new Error("Connected to Intuit's test company, so the customer list wasn't changed.");
   const d={imported:new Date().toISOString(),importedBy:auto?"automatic update":userName(),source:"QuickBooks Online",customers:j.customers};
   await Store.putFile("customers/qbo-customers.json",new Blob([JSON.stringify(d)],{type:"application/json"}));setQbo(d);
   if(ADDR.state==="ready")await seedFromQbo().catch(()=>{});
   return d.customers.length}
 async function autoQbSync(){ // once a day, the first person to open the app refreshes the customer list from QuickBooks
-  if(MOCK||!qbOn()||QBO.state==="loading")return;const age=Date.now()-(Date.parse(QBO.imported||"")||0);
+  if(MOCK||!qbOn()||qbCfg().env!=="production"||QBO.state==="loading")return; // never fill the real customer list from Intuit's test companyconst age=Date.now()-(Date.parse(QBO.imported||"")||0);
   if(age<20*3600e3)return;try{const n=await syncQbCustomers(true);softRender();console.log("QuickBooks customers updated:",n)}catch(e){console.warn("QuickBooks customer update skipped:",e.message)}}
 const qbItemName=id=>{const it=qbCfg().items.find(i=>String(i.id)===String(id));return it?it.name:""};
 function qbLines(o,ms){const c=qbCfg(),byName=new Map(c.items.map(i=>[i.name.trim().toLowerCase(),i]));const lines=[],missing=new Set();
@@ -1678,7 +1679,7 @@ function viewQbo(){const st=QB.status,c=qbCfg(),r=route();
       <div class="note">Each Work needed checkbox becomes an estimate line with the QuickBooks item you pick here. ${c.items.length.toLocaleString()} items loaded${c.itemsAt?" "+fmtDay(c.itemsAt):""}.</div>
       <table class="list" style="max-width:640px"><thead><tr><th>Checkbox</th><th>QuickBooks item</th></tr></thead><tbody>${work.map(w=>`<tr><td>${esc(w)}</td><td><select data-qbmap="${esc(w)}">${opts(c.map[w])}</select></td></tr>`).join("")}</tbody></table>
       <div class="note">Parts are matched to QuickBooks items by name. <button class="linkbtn" data-act="qb-parts">Replace the Parts list with the QuickBooks items</button> so every part a tech can pick matches. ${(()=>{const names=new Set(c.items.map(i=>i.name.trim().toLowerCase()));const bad=(S.lists.parts||[]).filter(p=>!names.has(String(p).trim().toLowerCase()));return bad.length?`<b>${bad.length} part${bad.length===1?"":"s"} in the current list ${bad.length===1?"isn't a QuickBooks item":"aren't QuickBooks items"}:</b> ${esc(bad.slice(0,8).join(", "))}${bad.length>8?"…":""}`:"All parts in the list match QuickBooks items."})()}</div></div></div>
-    <div class="panel"><div class="hd"><h2>Customers</h2><button class="btn small" data-act="qb-customers">Update customers now</button></div><div class="bd stack">
+    <div class="panel"><div class="hd"><h2>Customers</h2>${test?"":`<button class="btn small" data-act="qb-customers">Update customers now</button>`}</div><div class="bd stack">${test?`<div class="callout info">While connected to Intuit's test company, the app keeps your real customer list and doesn't update it from QuickBooks.</div>`:""}
       <div class="note">The customer list (client names, contacts and addresses) now comes straight from QuickBooks and updates automatically once a day. ${QBO.state==="ready"?`${QBO.list.length.toLocaleString()} customers, last updated ${QBO.imported?new Date(QBO.imported).toLocaleString():""}${QBO.importedBy?" ("+esc(QBO.importedBy)+")":""}.`:""}</div></div></div>`:""}
   </div>`}
 async function qbAction(act,a){
