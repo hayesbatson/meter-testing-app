@@ -69,7 +69,7 @@ async function saveJob(fn){const oid=B.oid;const next=await updateJson(`batch/${
 let sumTimer=null;
 function summary(){clearTimeout(sumTimer);sumTimer=setTimeout(async()=>{if(!B.view)return;const o=S.orders.get(B.oid);if(!o)return;const j=B.view,rows=allRows();
   const s={name:j.name,approved:j.approved,runsN:j.runs.length,entered:rows.length+j.blocked.length,pass:rows.filter(x=>x.c.overall==="pass").length,fail:rows.filter(x=>x.c.overall==="fail").length,
-    locked:j.blocked.length,look:rows.filter(x=>rowWarnings(x.r,x.run,j).length).length,manifestN:j.manifest.length,finish:(()=>{try{const i=schedInfo(j);return (i.likely&&i.likely.finish)||(i.plan&&i.plan.finish)||""}catch(e){return ""}})()};
+    locked:j.blocked.length,openRuns:j.runs.filter(r=>r.rows.some(x=>x.ser.trim())&&!runDone(r)).length,look:rows.filter(x=>rowWarnings(x.r,x.run,j).length).length,manifestN:j.manifest.length,finish:(()=>{try{const i=schedInfo(j);return (i.likely&&i.likely.finish)||(i.plan&&i.plan.finish)||""}catch(e){return ""}})()};
   const cur=o.batch||{};if(Object.keys(s).every(k=>cur[k]===s[k]))return;
   try{await put("orders",o.id,{...S.orders.get(o.id),batch:{...cur,...s}})}catch(e){}},2500)}
 /* WO numbers come from the app's sequence; a block the size of the bench is reserved at a time */
@@ -580,7 +580,8 @@ document.addEventListener("click",async e=>{const a=e.target.closest("[data-act]
     if(!j.approved){const open=j.runs.filter(r=>!runDone(r)&&r.rows.some(x=>x.ser));if(open.length){toast(`Finish run${open.length>1?"s":""} ${open.map(r=>r.no).join(" and ")} before approving.`);return}
       const n=allRows().filter(x=>rowWarnings(x.r,x.run,j).length).length;if(n){toast(`${n} meter${n>1?"s":""} still need${n>1?"":"s"} a look. Fix ${n>1?"them":"it"} or mark ${n>1?"them":"it"} checked before approving.`);return}}
     await flush();const to=!j.approved;
-    try{await saveJob(d=>{d.approved=to;d.approvedBy=to?ME():"";d.approvedAt=to?Date.now():0});toast(to?"Job approved. Runs are locked.":"Approval removed. Runs can be changed again.")}catch(err){toast("Couldn't save: "+err.message)}render();return}
+    try{await saveJob(d=>{d.approved=to;d.approvedBy=to?ME():"";d.approvedAt=to?Date.now():0});toast(to?"Job approved. Runs are locked.":"Approval removed. Runs can be changed again.");
+      const o=S.orders.get(B.oid);if(o&&to&&o.status!=="Approved by manager"&&o.status!=="Ready to ship"&&o.status!=="Complete"){await put("orders",o.id,{...o,status:"Approved by manager",statusLog:[...(o.statusLog||[]),{status:"Approved by manager",at:Date.now(),by:ME()}]})}}catch(err){toast("Couldn't save: "+err.message)}render();return}
   if(act==="sc-reset"){j.sched.edits={};render();saveSched();toast("Your changes are cleared. The plan is back to full days.");return}
   if(act==="sc-manifest"){const z=j.sched.sizes[j.sched.manifestSize];if(z)z.meters=null;render();saveSched();return}
   if(act==="sc-clear"){Object.keys(j.sched.edits).forEach(k=>{if(k.startsWith(a.dataset.date+"|"))delete j.sched.edits[k]});render();saveSched();return}

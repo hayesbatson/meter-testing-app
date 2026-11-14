@@ -844,7 +844,9 @@ function viewReview(){
       <td style="white-space:normal;min-width:220px">${m.question?`<div class="qbox">${esc(m.question)}</div>`:'<span class="muted">—</span>'}</td>
       <td data-stop><button class="btn small primary" data-act="approve" data-id="${m.id}">Approve</button></td></tr>`}).join("");
   const readyN=all.filter(m=>m.status==="ready").length;
-  return `<div class="stack"><div class="row spread"><h1>End-of-day review</h1>
+  const bj=[...S.orders.values()].filter(o=>o.batch&&!o.batch.approved&&o.batch.entered&&!o.batch.openRuns&&!o.batch.look);
+  const bpanel=bj.length?`<div class="panel"><div class="hd"><h2>Batch jobs ready to approve</h2><span class="note">Every run finished, nothing needs a look</span></div><div class="tablewrap"><table class="list"><thead><tr><th>Client</th><th>Batch job</th><th class="num">Meters</th><th class="num">Pass</th><th class="num">Fail</th><th class="num">Locked up</th><th></th></tr></thead><tbody>${bj.map(o=>`<tr class="click" data-go="batch-${o.id}.job"><td><b>${esc(o.client)}</b></td><td>${esc(o.batch.name)}</td><td class="num">${(o.batch.entered||0).toLocaleString()}</td><td class="num">${o.batch.pass||0}</td><td class="num">${o.batch.fail||0}</td><td class="num">${o.batch.locked||0}</td><td><span class="btn small">Open</span></td></tr>`).join("")}</tbody></table></div></div>`:"";
+  return `<div class="stack">${bpanel}<div class="row spread"><h1>End-of-day review</h1>
     <div class="row"><select id="rtech" style="width:auto"><option value="">All techs</option>${techs.map(t=>`<option ${t===reviewTech?"selected":""}>${esc(t)}</option>`).join("")}</select>
     <button class="btn" data-act="approve-ready" ${readyN?"":"disabled"}>Approve ${readyN} without questions</button></div></div>
     ${runningTimers().length?`<div class="callout warn">${runningTimers().length} work timer${runningTimers().length>1?"s are":" is"} still running. See <a href="#perf">Performance</a> to stop any that were forgotten.</div>`:""}
@@ -1246,7 +1248,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.14.0";
+const APP_VERSION="1.14.1";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
