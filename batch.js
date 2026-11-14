@@ -496,7 +496,7 @@ function xlBuild(){const {C,data,map}=B.xl;const v=i=>r=>String(r[i]==null?"":r[
   return {runs,blocked}}
 function xlPanel(){const x=B.xl,j=J();
   if(!x){const empty=!j.runs.some(r=>r.rows.some(y=>y.ser.trim()))&&!j.blocked.length;if(!empty||j.approved)return "";
-    return `<div class="panel"><div class="hd"><h2>Moving a job that's already in progress?</h2><label class="btn small">Import the techs' Excel sheet<input type="file" id="xl-up" accept=".xlsx,.xlsm,.xls" hidden></label></div><div class="bd note">Choose the batch testing workbook the techs have been filling in (like Keystone_Aqua Batch 4.xlsx). The app reads every tested meter into bench runs, adds the client's serial list as this job's manifest, and gives each meter a work order number. Nothing is saved until you check the preview and click Import.</div></div>`}
+    return `<div class="panel"><div class="hd"><h2>Moving a job that's already in progress?</h2><label class="btn small">Import the techs' Excel sheet<input type="file" id="xl-up" accept=".xlsx,.xlsm,.xls" hidden></label></div><div class="bd row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:260px">Or paste the workbook's SharePoint link<input id="xl-link" placeholder="https://midamericameter365.sharepoint.com/…"></label><button class="btn small" data-act="b-xl-link">Read from SharePoint</button></div><div class="bd note">Choose the batch testing workbook the techs have been filling in (like Keystone_Aqua Batch 4.xlsx). The app reads every tested meter into bench runs, adds the client's serial list as this job's manifest, and gives each meter a work order number. Nothing is saved until you check the preview and click Import.</div></div>`}
   const {runs,blocked}=xlBuild();const meters=runs.reduce((s,r)=>s+r.rows.filter(y=>y.ser).length,0);const done=runs.filter(runDone).length;
   const dates=runs.map(r=>r.date).filter(Boolean).sort();const fails=runs.reduce((s,r)=>s+r.rows.filter(y=>y.ser&&calc(y,r).overall==="fail").length,0);
   const unmapped=x.ops.filter(o=>!x.map[o]);const sizes=[...new Set(x.data.map(r=>String(r[x.C.size]||"").trim()))].filter(z=>!SIZE_FROM_SHEET(z));
@@ -651,6 +651,8 @@ document.addEventListener("click",async e=>{const a=e.target.closest("[data-act]
   if(act==="sc-clear"){Object.keys(j.sched.edits).forEach(k=>{if(k.startsWith(a.dataset.date+"|"))delete j.sched.edits[k]});render();saveSched();return}
   if(act==="xl-cancel"){B.xl=null;render();return}
   if(act==="xl-go"){await xlImport(a);return}
+  if(act==="xl-link"){const l=($("#xl-link").value||"").trim();if(!/^https:\/\/.+sharepoint\.com\//i.test(l)){toast("Paste a SharePoint link to the workbook.");return}
+    if(!Store.getShared){toast("Not available here.");return}a.disabled=true;a.textContent="Reading…";try{await xlRead(await Store.getShared(l))}catch(err){toast("Couldn't read that workbook: "+err.message);a.disabled=false;a.textContent="Read from SharePoint"}render();window.scrollTo(0,0);return}
   if(act==="mf-cancel"){B.mf=null;render();return}
   if(act==="mf-save"){await mfSave(a);return}
   if(act==="mf-dl"){const f=j.files[+a.dataset.i];try{const r=await Store.getFile(f.orig);offer(f.name,await r.blob())}catch(err){toast("Couldn't download: "+err.message)}return}

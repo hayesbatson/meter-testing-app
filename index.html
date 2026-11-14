@@ -1248,7 +1248,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.14.2";
+const APP_VERSION="1.14.3";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1354,6 +1354,9 @@ const GraphStore={
   async fileUrl(itemId){const it=await gfetch(`/sites/${siteId}/drive/items/${itemId}`);return it["@microsoft.graph.downloadUrl"]},
   async getJson(path){let it;try{it=await gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}?$select=id,eTag,@microsoft.graph.downloadUrl`)}catch(e){if(e.status===404)return {data:null,etag:null};throw e}
     const r=await fetch(it["@microsoft.graph.downloadUrl"],{cache:"no-store"});if(!r.ok)throw new Error("Couldn't download "+path);return {data:await r.json(),etag:it.eTag}},
+  async getShared(link){const id="u!"+btoa(unescape(encodeURIComponent(link.trim()))).replace(/=+$/,"").replace(/\//g,"_").replace(/\+/g,"-");
+    const it=await gfetch(`/shares/${id}/driveItem?$select=name,@microsoft.graph.downloadUrl`);const r=await fetch(it["@microsoft.graph.downloadUrl"]);if(!r.ok)throw new Error("Couldn't download the file");
+    return new File([await r.blob()],it.name||"workbook.xlsx")},
   async putJsonIf(path,data,etag){const headers={"Content-Type":"application/json"};if(etag)headers["If-Match"]=etag;else headers["If-None-Match"]="*";
     const it=await gfetch(`/sites/${siteId}/drive/root:/${encPath(CFG.folder+"/"+path)}:/content`,{method:"PUT",body:new Blob([JSON.stringify(data)],{type:"application/json"}),headers});return it&&it.eTag},
   async removeFile(itemId){await gfetch(`/sites/${siteId}/drive/items/${itemId}`,{method:"DELETE"})},
