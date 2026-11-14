@@ -178,7 +178,7 @@ function viewRun(){
     ${!lock&&miss.length&&run.rows.some(r=>r.ser)?`<div class="callout info">Still needed to finish this run: ${esc(miss.join(", "))}.</div>`:""}
     <div class="runset">
       <label class="f">Test date<input id="rs-date" type="date" data-rs="date" value="${esc(run.date)}" ${dis}></label>
-      <label class="f">Tech<select id="rs-tech" data-rs="tech" ${dis}><option value="">Choose…</option>${TECHS().map(t=>`<option ${run.tech===t?"selected":""}>${t}</option>`).join("")}</select></label>
+      <label class="f">Tech<select id="rs-tech" data-rs="tech" ${dis}><option value="">Choose…</option>${[...TECHS(),...(run.tech&&!TECHS().includes(run.tech)?[run.tech]:[])].map(t=>`<option ${run.tech===t?"selected":""}>${esc(t)}</option>`).join("")}</select></label>
       <label class="f">Size<select id="rs-size" data-rs="size" ${dis}><option value="">Choose…</option>${szs.map(s=>`<option ${run.size===s?"selected":""}>${esc(s)}</option>`).join("")}</select></label>
       <label class="f">Make<input id="rs-make" data-rs="make" value="${esc(run.make)}" ${dis}></label>
       <label class="f">Model<input id="rs-model" data-rs="model" value="${esc(run.model)}" ${dis}></label>
@@ -479,10 +479,10 @@ async function xlRead(file){if(!window.XLSX)throw new Error("The Excel tool didn
   let manifest=null;for(const n of wb.SheetNames){if(n===sheet)continue;const r=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:"",raw:false});const i=r.findIndex(x=>x.some(c=>/serial/i.test(String(c))));
     if(i<0)continue;const hd=r[i].map(c=>String(c||"").trim());const si=hd.findIndex(c=>/serial/i.test(c));let ri=hd.findIndex(c=>/read/i.test(c));
     if(ri<0){const cnt=hd.map((_,ci)=>r.slice(i+1,i+40).filter(x=>num(x[ci])!=null).length);ri=cnt.findIndex((c,ci)=>ci!==si&&c>20)}
-    manifest={sheet:n,rows:r.slice(i+1).map(x=>({ser:String(x[si]||"").trim(),read:ri>=0?num(x[ri]):null})).filter(x=>x.ser)};break}
+    manifest={sheet:n,rows:r.slice(i+1).map(x=>({ser:String(x[si]||"").trim(),read:ri>=0?num(x[ri]):null})).filter(x=>/^[\w-]+$/.test(x.ser)&&!/^0+$/.test(x.ser))};break}
   const ops=[...new Set(data.map(r=>String(r[C.op]||"").trim()).filter(Boolean))];
   const techs=TECHS();const guess=o=>techs.find(t=>t.toLowerCase()===o.toLowerCase())||techs.find(t=>t[0]&&t[0].toLowerCase()===o[0].toLowerCase()&&ops.filter(x=>x[0]===o[0]).length===1)||"";
-  B.xl={file,sheet,C,data,manifest,ops,map:Object.fromEntries(ops.map(o=>[o,guess(o)]))}}
+  B.xl={file,sheet,C,data,manifest,ops,map:Object.fromEntries(ops.map(o=>[o,o]))}}
 function xlBuild(){const {C,data,map}=B.xl;const v=i=>r=>String(r[i]==null?"":r[i]).trim();const runs=[],blocked=[];let cur=null,key="";
   data.forEach(r=>{const g=k=>v(C[k])(r);const reads=[...C.beg,...C.end].some(i=>v(i)(r));
     if(!reads){if(/lock|stuck|frozen|seized|no reg|could not|couldn.t/i.test(g("notes"))){blocked.push({ser:g("ser"),wo:"",arrive:g("arrive"),run:null,pos:null,date:DATE_FROM_SHEET(g("date"))||today(),tech:map[g("op")]||g("op"),by:ME(),note:g("notes")});return}}
@@ -503,7 +503,8 @@ function xlPanel(){const x=B.xl,j=J();
   return `<div class="panel" style="border-color:var(--accent)"><div class="hd"><h2>Import ${esc(x.file.name)}</h2></div><div class="bd stack">
     <div class="stats"><div class="stat"><b>${meters.toLocaleString()}</b><span>Meters tested</span></div><div class="stat"><b>${runs.length}</b><span>Bench runs</span></div><div class="stat fail"><b>${fails}</b><span>Fail</span></div><div class="stat"><b>${blocked.length}</b><span>Untested (locked up)</span></div><div class="stat"><b>${x.manifest?x.manifest.rows.length.toLocaleString():"—"}</b><span>Serials in the client list</span></div></div>
     <div class="note">Tested ${dates.length?esc(dayLbl(dates[0]))+" to "+esc(dayLbl(dates[dates.length-1])):""}. Rows are grouped into bench runs the way they were tested: same date, tech, size and test volumes, up to ${posFor(runs[0]&&runs[0].size)} meters per run. ${done<runs.length?`<b>${runs.length-done} run${runs.length-done>1?"s are":" is"} not complete</b> (missing reads); finish ${runs.length-done>1?"them":"it"} on the Bench run screen.`:"Every run is complete."}${x.manifest?` The serial list from the “${esc(x.manifest.sheet)}” sheet becomes this job's manifest.`:""}</div>
-    <div class="grid g3">${x.ops.map(o=>`<label class="f">Operator “${esc(o)}” is<select data-xlop="${esc(o)}"><option value="">Choose the tech…</option>${TECHS().map(t=>`<option ${x.map[o]===t?"selected":""}>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>
+    <div class="grid g3">${x.ops.map(o=>`<label class="f">Operator “${esc(o)}” is<select data-xlop="${esc(o)}"><option value="${esc(o)}" ${x.map[o]===o?"selected":""}>Keep “${esc(o)}” as written</option>${TECHS().filter(t=>t!==o).map(t=>`<option ${x.map[o]===t?"selected":""}>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>
+    <div class="note">The tech's name or initials appear in the Operator column of the client file.</div>
     ${sizes.length?`<div class="callout warn">Unknown size${sizes.length>1?"s":""} in the sheet: ${esc(sizes.join(", "))}. Those runs will need the size picked on the Bench run screen.</div>`:""}
     <div class="note">Each meter gets the next work order number, ${meters+blocked.length} in all, the same as if it had been entered here. The workbook itself isn't changed.</div>
     <div class="row"><button class="btn primary" data-act="b-xl-go" ${unmapped.length?"disabled":""}>Import ${meters.toLocaleString()} meters</button><button class="btn" data-act="b-xl-cancel">Cancel</button>${unmapped.length?`<span class="note">Choose the tech for ${esc(unmapped.join(", "))} first.</span>`:""}</div></div></div>`}
