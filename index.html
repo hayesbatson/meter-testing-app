@@ -1174,7 +1174,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.13.2";
+const APP_VERSION="1.13.3";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1634,14 +1634,21 @@ function sizeKey(x){const fr=t=>{t=t.trim();let m=t.match(/^(\d+)-(\d+)\/(\d+)$/
   const parts=String(x||"").replace(/["”″]/g,"").toLowerCase().split(/\s*x\s*/).map(fr);return parts.some(v=>v==null)?"":parts.map(v=>+v.toFixed(3)).join("x")}
 function qbAutoFill(){const c=qbCfg(),sizes=S.lists.sizes||DEFAULT_LISTS.sizes,made=[],gaps=[];
   const tests=c.items.map(i=>{const m=i.name.match(/^test\s+([\d./]+(?:\s*x\s*[\d./]+)?)["”″]?\s+(.+)$/i);if(!m)return null;const k=QB_KINDS.find(([re])=>re.test(m[2]));return k?{id:i.id,size:sizeKey(m[1]),types:k[1]}:null}).filter(Boolean);
-  const keep=c.rules.filter(r=>r.work!=="Test"||!r.auto);
-  sizes.forEach(z=>TYPES.forEach(t=>{const it=tests.find(x=>x.size===sizeKey(z)&&x.types.includes(t));
+  const keep=c.rules.filter(r=>!r.auto);
+  const ALIAS={"0.625":"0.625x0.75","0.75":"0.75x0.75"}; // plain 5/8" and 3/4" use the 5/8x3/4 and 3/4x3/4 items when there's no exact one
+  const find=(key,t)=>tests.find(x=>x.size===key&&x.types.includes(t));
+  sizes.forEach(z=>TYPES.forEach(t=>{const k=sizeKey(z);const it=find(k,t)||(ALIAS[k]&&find(ALIAS[k],t));
     if(it){if(!keep.some(r=>r.work==="Test"&&r.size===z&&r.type===t))made.push({work:"Test",size:z,type:t,itemId:it.id,auto:true})}else gaps.push(`${z} ${t}`)}));
+  /* New gasket: each size defaults to its Drop In gasket; small threaded meters use the coupling gasket for their connection size */
+  const gk=re=>c.items.map(i=>{const m=i.name.match(re);return m?{id:i.id,size:sizeKey(m[1])}:null}).filter(Boolean);
+  const drop=gk(/^gasket\s+([\d./]+)["”″]?\s+drop in/i),coup=gk(/^gasket coupling\s+([\d./]+)["”″]?/i);
+  sizes.forEach(z=>{if(keep.some(r=>r.work==="New gasket"&&r.size===z&&!r.type))return;const k=sizeKey(z),conn=(ALIAS[k]||k).split("x").pop();
+    const it=drop.find(x=>x.size===k)||(parseFloat(k)<1.5?coup.find(x=>x.size===conn):null);if(it)made.push({work:"New gasket",size:z,type:"",itemId:it.id,auto:true})});
   c.rules=[...keep,...made];
   const by=re=>{const i=c.items.find(x=>re.test(x.name));return i&&i.id};
   if(!c.map.Clean){const id=by(/^clean/i);if(id)c.map.Clean=id}
   if(!c.map.Calibrate){const id=by(/^calibrat/i);if(id)c.map.Calibrate=id}
-  if(c.map.Test&&made.length)delete c.map.Test; // a single catch-all test item would hide missing sizes
+  if(c.map.Test&&made.length)delete c.map.Test;if(c.map["New gasket"]&&made.some(r=>r.work==="New gasket"))delete c.map["New gasket"]; // a single catch-all test item would hide missing sizes
   return {made:made.length,gaps}}
 /* the QuickBooks item for a work checkbox on a given meter: the most specific matching row (size + type, then size, then type), else the default */
 function qbItemFor(work,m){const c=qbCfg();let best=null,bs=-1;
@@ -1727,8 +1734,8 @@ function viewQbo(){const st=QB.status,c=qbCfg(),r=route();
 async function qbAction(act,a){
   if(act==="qb-connect"){a.disabled=true;try{const j=await qbCall("/start",{method:"POST"});location.href=j.url}catch(e){a.disabled=false;toast("Couldn't start: "+e.message)}return true}
   if(act==="qb-disconnect"){if(!confirmClick(a,"Click again to disconnect"))return true;a.disabled=true;try{await qbCall("/disconnect",{method:"POST"});qbCfg().connected=false;await saveQbCfg();QB.status=null;toast("QuickBooks disconnected")}catch(e){toast("Couldn't disconnect: "+e.message)}render();return true}
-  if(act==="qb-autofill"){if(!confirmClick(a,"Click again to fill in the Test rows from QuickBooks item names"))return true;const r=qbAutoFill();
-    try{await saveQbCfg();QB.gaps=r.gaps;toast(`${r.made} Test rows filled in.`)}catch(e){toast("Couldn't save: "+e.message)}render();return true}
+  if(act==="qb-autofill"){if(!confirmClick(a,"Click again to fill in the rows from QuickBooks item names"))return true;const r=qbAutoFill();
+    try{await saveQbCfg();QB.gaps=r.gaps;toast(`${r.made} rows filled in for Test and New gasket.`)}catch(e){toast("Couldn't save: "+e.message)}render();return true}
   if(act==="qb-rule-add"){qbCfg().rules.push({work:a.dataset.work,size:"",type:"",itemId:""});render();return true}
   if(act==="qb-rule-del"){qbCfg().rules.splice(+a.dataset.i,1);try{await saveQbCfg()}catch(e){toast("Couldn't save: "+e.message)}render();return true}
   if(act==="qb-items"){a.disabled=true;a.textContent="Loading…";try{const n=await qbLoadItems();toast(`${n.toLocaleString()} QuickBooks items loaded`)}catch(e){toast("Couldn't load items: "+e.message)}render();return true}
