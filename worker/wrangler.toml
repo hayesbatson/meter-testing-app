@@ -3,6 +3,10 @@ main = "src/index.js"
 compatibility_date = "2024-09-23"
 workers_dev = true
 
+# keeps the service's logs (including QuickBooks errors and Intuit's intuit_tid) for troubleshooting
+[observability]
+enabled = true
+
 [vars]
 SITE = "midamericameter365.sharepoint.com:/sites/Metertestingapp"
 ALLOWED_ORIGIN = "https://hayesbatson.github.io"

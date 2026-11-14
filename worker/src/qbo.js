@@ -95,6 +95,7 @@ async function tokenCall(env, params) {
     body: new URLSearchParams(params),
   });
   const j = await r.json().catch(() => ({}));
+  if (!r.ok) console.error(JSON.stringify({ qbo: "token", status: r.status, error: j.error, intuit_tid: r.headers.get("intuit_tid") }));
   if (!r.ok) { const e = new Error(j.error_description || j.error || "QuickBooks sign-in failed (" + r.status + ")"); e.code = j.error; throw e; }
   return { access: j.access_token, accessExp: Date.now() + (j.expires_in || 3600) * 1000, refresh: j.refresh_token, refreshExp: Date.now() + (j.x_refresh_token_expires_in || 8640000) * 1000 };
 }
@@ -132,7 +133,9 @@ async function qb(env, g, path, opt = {}, retried) {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const f = j.Fault && j.Fault.Error && j.Fault.Error[0];
-    const e = new Error(f ? (f.Detail || f.Message) : "QuickBooks error " + r.status);
+    const tid = r.headers.get("intuit_tid") || "";
+    console.error(JSON.stringify({ qbo: "api", path: path.split("?")[0], status: r.status, code: f && f.code, message: f && (f.Detail || f.Message), intuit_tid: tid }));
+    const e = new Error((f ? (f.Detail || f.Message) : "QuickBooks error " + r.status) + (tid ? ` (Intuit ref ${tid})` : ""));
     e.status = r.status === 401 ? 401 : 502; e.qbCode = f && f.code; throw e;
   }
   return j;
