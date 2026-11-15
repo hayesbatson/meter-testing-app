@@ -243,6 +243,8 @@ textarea{resize:vertical;min-height:64px}
 .fieldrep table.hdr{width:100%;margin:12px 0}.fieldrep table.hdr td{padding:3px 0}
 .frtbl{width:100%;border-collapse:collapse;font-size:11px}.frtbl th,.frtbl td{border:1px solid #bbb;padding:4px 5px;vertical-align:top}.frtbl th{background:#eef1f3;text-align:left}
 @media print{.noprint,header,nav{display:none!important}}
+#ob-banner{position:fixed;left:8px;right:8px;bottom:8px;z-index:50;background:#fff7e0;border:1px solid #e0b84a;border-radius:10px;padding:10px 12px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.15)}
+#ob-banner .btn{margin-left:6px}
 </style>
 
 <style>
@@ -1057,6 +1059,7 @@ document.addEventListener("click",async e=>{
     if(act==="track-copy"){copyText(a.dataset.t).then(ok=>{if(ok)toast("Tracking number copied. Paste it on the carrier's page.")});return}
     if(act&&act.startsWith("req-")&&await reqAction(act,a))return;
     if(act&&act.startsWith("qb-")&&await qbAction(act,a))return;
+    if(act==="ob-retry"){obFlush();return}
     if(act&&(act.startsWith("fp-")||act==="fld-import")&&await fieldPhotoAction(act,a))return;
     if(act&&(act==="fmethod"||act.startsWith("fld-"))&&await fieldAction(act,a))return;
     if(act==="addr-setup"){a.disabled=true;a.textContent="Setting up…";
@@ -1241,8 +1244,8 @@ document.addEventListener("change",async e=>{
   if(t.id==="req-filter"){reqFilter=t.value;render();return}
   if(t.id==="fp-tech"){try{localStorage.setItem("fp-tech",t.value.trim())}catch(e){}return}
   if(t.dataset&&t.dataset.fp){const f=t.files[0];t.value="";if(f)await fpSave(f,t.dataset.fp);return}
-  if(t.dataset&&t.dataset.fq){const [mid,path]=t.dataset.fq.split("|");const m=S.meters.get(mid);if(!m)return;const n=clone(m);setPath(n,path,t.value);if(path.startsWith("fld.")||path.startsWith("reads."))n.status=n.status||"in_progress";
-    try{await put("meters",mid,n);const el=document.querySelector(`[data-facc="${mid}"]`);if(el)el.textContent=fieldAccTxt(n)||"—";if(path==="fld.cant")render()}catch(err){toast("Couldn't save: "+err.message)}return}
+  if(t.dataset&&t.dataset.fq){const [mid,path]=t.dataset.fq.split("|");if(!S.meters.get(mid))return;
+    try{const r=await meterOp(mid,{op:"set",path,value:t.value});const n=S.meters.get(mid);const el=document.querySelector(`[data-facc="${mid}"]`);if(el)el.textContent=fieldAccTxt(n)||"—";if(r==="queued")toast("No signal: saved on the phone. It uploads when you're back in service.");if(path==="fld.cant")render()}catch(err){toast("Couldn't save: "+err.message)}return}
   if(t.dataset&&t.dataset.fo){const [oid,path]=t.dataset.fo.split("|");const o=S.orders.get(oid);if(!o)return;const n=clone(o);setPath(n,path,t.value.trim());try{await put("orders",oid,n);toast("Saved")}catch(err){toast("Couldn't save: "+err.message)}return}
   if(t.dataset&&t.dataset.qbrule){const [i,f]=t.dataset.qbrule.split("|");const r=qbCfg().rules[+i];if(r){r[f]=t.value;try{await saveQbCfg()}catch(err){toast("Couldn't save: "+err.message)}}return}
   if(t.dataset&&t.dataset.qbmap!==undefined){const c=qbCfg();if(t.value)c.map[t.dataset.qbmap]=t.value;else delete c.map[t.dataset.qbmap];try{await saveQbCfg();toast(t.value?`“${t.dataset.qbmap}” → ${qbItemName(t.value)}`:"Link removed")}catch(err){toast("Couldn't save: "+err.message)}render();return}
@@ -1276,7 +1279,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.16.0";
+const APP_VERSION="1.17.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1487,7 +1490,7 @@ async function afterSignIn(){
     const ok=await Store.connect();
     if(!ok){mode="setup";render();return}
     await loadAll();mode="ready";render();
-    loadHistory();loadQbo().then(autoQbSync);loadAddresses().then(softRender);loadRequests().then(softRender);
+    loadHistory();loadQbo().then(autoQbSync);obCount().then(()=>{if(OB.n)obFlush()});loadAddresses().then(softRender);loadRequests().then(softRender);
     clearInterval(refreshTimer);refreshTimer=setInterval(refresh,60000);
   }catch(e){mode="error";loadError=e.status===403||e.status===401?"Your Microsoft account doesn't have access to the Meter Testing App SharePoint site. Ask Hayes to add you as a member. ("+e.message+")":e.message;render()}
 }
@@ -1939,8 +1942,8 @@ async function fpFolder(link){if(fpState.folder[link])return fpState.folder[link
   const it=await gfetch(`/shares/${id}/driveItem`);if(!it.folder)throw new Error("That link isn't a folder.");
   return fpState.folder[link]={drive:it.parentReference.driveId,id:it.id,name:it.name}}
 async function fpUpload(link,rel,blob){const f=await fpFolder(link);const base=`/drives/${f.drive}/items/${f.id}:/${rel.split("/").map(encodeURIComponent).join("/")}`;
-  if(blob.size<3.5e6)return gfetch(`${base}:/content?@microsoft.graph.conflictBehavior=rename`,{method:"PUT",body:blob,headers:{"Content-Type":blob.type||"image/jpeg"}});
-  const s=await gfetch(`${base}:/createUploadSession`,{method:"POST",body:JSON.stringify({item:{"@microsoft.graph.conflictBehavior":"rename"}}),headers:{"Content-Type":"application/json"}});
+  if(blob.size<3.5e6)return gfetch(`${base}:/content?@microsoft.graph.conflictBehavior=replace`,{method:"PUT",body:blob,headers:{"Content-Type":blob.type||"image/jpeg"}});
+  const s=await gfetch(`${base}:/createUploadSession`,{method:"POST",body:JSON.stringify({item:{"@microsoft.graph.conflictBehavior":"replace"}}),headers:{"Content-Type":"application/json"}});
   const chunk=3276800;let res;for(let i=0;i<blob.size;i+=chunk){const part=blob.slice(i,Math.min(i+chunk,blob.size));
     const r=await fetch(s.uploadUrl,{method:"PUT",body:part,headers:{"Content-Range":`bytes ${i}-${i+part.size-1}/${blob.size}`}});if(!r.ok&&r.status!==202)throw new Error("Upload failed ("+r.status+")");res=r.status===202?null:await r.json().catch(()=>null)}
   return res}
@@ -1969,15 +1972,17 @@ async function fpSave(file,type){const m=S.meters.get(fpState.sel),o=m&&S.orders
   const ext=(/png$/i.test(file.type)?"png":/heic$/i.test(file.type)?"heic":"jpeg");
   const name=`${fpName(m.serial)}_${d}_${type}${type==="additional"&&n?"-"+(n+1):""}.${ext}`;
   const folder=`${fpName(m.serial)} ${fpName(site.name||m.location||"")} ${d}`.replace(/\s+/g," ").trim();
-  fpState.busy=`Saving ${name}…`;render();
-  try{await fpUpload(o.photoFolder,`${folder}/${name}`,file);
-    const nm={...S.meters.get(m.id)};nm.fphotos=[...(nm.fphotos||[]),{type,name,folder,date:d,at:Date.now(),by:fpTech()}];await put("meters",m.id,nm);fpState.busy="";toast("Saved "+name)}
-  catch(e){fpState.busy="";toast("Couldn't save the photo: "+e.message)}render()}
+  fpState.busy=`Saving ${name}…`;render();const entry={type,name,folder,date:d,at:Date.now(),by:fpTech()};
+  let queued=false;
+  try{if(!navigator.onLine)throw new TypeError("offline");await withTimeout(fpUpload(o.photoFolder,`${folder}/${name}`,file),60000)}
+  catch(e){if(!isNetErr(e)){fpState.busy="";toast("Couldn't save the photo: "+e.message);render();return}
+    try{await obAdd({kind:"photo",link:o.photoFolder,rel:`${folder}/${name}`,blob:file,name});queued=true}catch(err){fpState.busy="";toast("No signal, and the phone couldn't keep the photo: "+err.message);render();return}}
+  try{const r=await meterOp(m.id,{op:"photo",entry});fpState.busy="";obCount();toast(queued||r==="queued"?`No signal: ${name} is saved on the phone and will upload when you're back in service.`:"Saved "+name)}
+  catch(e){fpState.busy="";toast("Photo saved, but the list couldn't update: "+e.message)}render()}
 async function fieldPhotoAction(act,a){
   if(act==="fp-pick"){fpState.sel=a.dataset.id;render();window.scrollTo(0,0);return true}
   if(act==="fp-done"){fpState.sel="";fpState.q="";render();setTimeout(()=>{const q=document.getElementById("fp-q");if(q)q.focus()},50);return true}
-  if(act==="fp-note"){const t=(document.getElementById("fp-note").value||"").trim();if(!t)return true;const m=S.meters.get(fpState.sel);const nm={...m,fnotes:[...(m.fnotes||[]),{text:t,at:Date.now(),by:fpTech()}]};
-    try{await put("meters",m.id,nm);toast("Note saved")}catch(e){toast("Couldn't save: "+e.message)}render();return true}
+  if(act==="fp-note"){const t=(document.getElementById("fp-note").value||"").trim();if(!t)return true;try{const r=await meterOp(fpState.sel,{op:"note",note:{text:t,at:Date.now(),by:fpTech()}});toast(r==="queued"?"No signal: note saved on the phone.":"Note saved")}catch(e){toast("Couldn't save: "+e.message)}render();return true}
   if(act==="fp-new"){const ser=(document.getElementById("fp-new-ser").value||"").trim(),nm=(document.getElementById("fp-new-name").value||"").trim();if(!ser||!nm){toast("Enter the serial and the business name.");return true}
     const oid=route().id;try{const id=await createRec("meters",{orderId:oid,wo:nextWo(),serial:ser,location:nm,site:{name:nm,unplanned:true},setting:"Field",fieldMethod:"rig",reads:{},status:"in_progress",testDate:today(),dateIn:today(),tech:S.myTech||""});fpState.sel=String(id);render()}catch(e){toast("Couldn't add it: "+e.message)}return true}
   if(act==="fld-import"){const o=S.orders.get(a.dataset.id);const link=(document.getElementById("fld-imp-link")||{}).value||"";if(!/sharepoint\.com/i.test(link)){toast("Paste the SharePoint link to the master workbook.");return true}
@@ -1995,6 +2000,36 @@ async function fieldPhotoAction(act,a){
       toast(`${added} meters added${updated?`, ${updated} updated`:""}.`)}catch(e){toast("Couldn't import: "+e.message)}render();return true}
   return false}
 const normSerial=s=>String(s||"").trim().toUpperCase().replace(/^0+(?=.)/,"");
+/* ---------- outbox: photos and field entries wait on the phone when there's no signal, then upload by themselves ---------- */
+const OB={db:null,n:0,photos:0,busy:false,err:""};
+function obDb(){return new Promise((res,rej)=>{if(OB.db)return res(OB.db);const r=indexedDB.open("mta-outbox",1);r.onupgradeneeded=()=>r.result.createObjectStore("q",{keyPath:"id"});r.onsuccess=()=>{OB.db=r.result;res(r.result)};r.onerror=()=>rej(r.error)})}
+const obTx=async(mode,fn)=>{const db=await obDb();return new Promise((res,rej)=>{const tx=db.transaction("q",mode);const st=tx.objectStore("q");const out=fn(st);tx.oncomplete=()=>res(out&&out.result!==undefined?out.result:undefined);tx.onerror=()=>rej(tx.error)})};
+const obAll=()=>obTx("readonly",st=>st.getAll());
+const obAdd=item=>obTx("readwrite",st=>st.put({id:"q"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),at:Date.now(),...item}));
+const obDel=id=>obTx("readwrite",st=>st.delete(id));
+function isNetErr(e){const m=String(e&&e.message||e||"");return !navigator.onLine||e instanceof TypeError||e&&e.name==="AbortError"||/fetch|network|Load failed|timed out|offline|no_network|endpoints_resolution|can't reach|internet connection/i.test(m)}
+/* change a meter the same way now (on this phone) and later (on the server) */
+function obApply(m,op){const n=clone(m||{});if(op.op==="set")setPath(n,op.path,op.value);else if(op.op==="photo"){n.fphotos=[...(n.fphotos||[])];if(!n.fphotos.some(p=>p.name===op.entry.name&&p.folder===op.entry.folder))n.fphotos.push(op.entry)}
+  else if(op.op==="note")n.fnotes=[...(n.fnotes||[]),op.note];if(op.op!=="photo"&&op.op!=="note"&&!n.status)n.status="in_progress";return n}
+async function meterOp(mid,op){const cur=S.meters.get(mid);const n=obApply(cur,op);S.meters.set(mid,n);
+  try{await put("meters",mid,n);return "saved"}
+  catch(e){if(!isNetErr(e))throw e;await obAdd({kind:"meter",mid,o:op});obCount();return "queued"}}
+async function obCount(){try{const all=await obAll();OB.n=all.length;OB.photos=all.filter(x=>x.kind==="photo").length}catch(e){}obBanner()}
+function obBanner(){let el=document.getElementById("ob-banner");if(!OB.n){if(el)el.remove();return}
+  if(!el){el=document.createElement("div");el.id="ob-banner";el.setAttribute("role","status");document.body.appendChild(el)}
+  const other=OB.n-OB.photos;el.innerHTML=`<b>Saved on this phone, waiting for signal:</b> ${OB.photos?`${OB.photos} photo${OB.photos>1?"s":""}`:""}${OB.photos&&other?" and ":""}${other?`${other} change${other>1?"s":""}`:""}. They upload by themselves when you're back in service; keep the app open or reopen it later. ${OB.busy?"<i>Uploading…</i>":`<button type="button" class="btn small" data-act="ob-retry">Try now</button>`}${OB.err?`<div class="note">Last problem: ${esc(OB.err)}</div>`:""}`}
+async function obFlush(){if(OB.busy)return;OB.busy=true;let all;try{all=(await obAll()).sort((a,b)=>a.at-b.at)}catch(e){OB.busy=false;return}if(!all.length){OB.busy=false;obCount();return}
+  obBanner();let done=0;
+  try{for(const it of all){
+      try{if(it.kind==="photo")await withTimeout(fpUpload(it.link,it.rel,it.blob),120000);
+        else if(it.kind==="meter"){let base=S.meters.get(it.mid);try{base=await Store.get("meters",it.mid)||base}catch(e){if(isNetErr(e))throw e}const n=obApply(base,it.o);await put("meters",it.mid,n)}
+        await obDel(it.id);done++;OB.err=""}
+      catch(e){if(isNetErr(e))break;OB.err=e.message;await obDel(it.id);toast("One saved item couldn't upload and was dropped: "+e.message)}}}
+  finally{OB.busy=false;await obCount();if(done){toast(`${done} saved item${done>1?"s":""} uploaded.`);softRender()}}}
+const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timed out")),ms))]);
+window.addEventListener("online",()=>setTimeout(obFlush,1500));
+setInterval(()=>{if(OB.n&&!document.hidden)obFlush()},30000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&OB.n)obFlush()});
 /* ---------- shipping ---------- */
 const DEFAULT_CARRIERS=[
   {name:"UPS",shipUrl:"https://www.ups.com/ship",trackUrl:"https://www.ups.com/track?tracknum={tracking}"},
