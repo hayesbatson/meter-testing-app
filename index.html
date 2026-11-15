@@ -1279,7 +1279,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.17.0";
+const APP_VERSION="1.17.1";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1490,7 +1490,7 @@ async function afterSignIn(){
     const ok=await Store.connect();
     if(!ok){mode="setup";render();return}
     await loadAll();mode="ready";render();
-    loadHistory();loadQbo().then(autoQbSync);obCount().then(()=>{if(OB.n)obFlush()});loadAddresses().then(softRender);loadRequests().then(softRender);
+    loadHistory();loadQbo().then(autoQbSync);obCount().then(()=>{if(OB.n)obFlush()});arPurge();loadAddresses().then(softRender);loadRequests().then(softRender);
     clearInterval(refreshTimer);refreshTimer=setInterval(refresh,60000);
   }catch(e){mode="error";loadError=e.status===403||e.status===401?"Your Microsoft account doesn't have access to the Meter Testing App SharePoint site. Ask Hayes to add you as a member. ("+e.message+")":e.message;render()}
 }
@@ -1954,6 +1954,8 @@ function viewFieldPhotos(oid){const o=S.orders.get(oid);if(!o)return `<div class
   const taken=m?(m.fphotos||[]).filter(p=>p.date===today_):[];
   return `<div class="stack fphone"><div class="crumb"><a href="#job-${oid}">${esc(o.client)} · ${esc(jobName(o))}</a> › Field photos</div>
     ${!o.photoFolder?`<div class="callout warn">The office needs to paste the photo folder's SharePoint link on the job page first.</div>`:""}
+    <div class="row spread"><span class="note">${OB.photos?`<b>${OB.photos} photo${OB.photos>1?"s":""} waiting for signal</b>`:"Every photo is also kept on this phone for 14 days."}</span><button class="btn small" data-act="fp-backup">Photos on this phone</button></div>
+    ${fpState.backup?`<div class="panel"><div class="hd"><h2>Photos kept on this phone</h2><button class="btn small" data-act="fp-backup">Close</button></div><div class="bd stack">${fpState.backup.length?fpState.backup.map((x,i)=>`<div class="row spread"><span><b class="mono">${esc(x.name)}</b><br><span class="note">${esc(fmtDay(x.at))} · ${x.uploaded?"✓ in SharePoint":"waiting to upload"}</span></span><button class="btn small" data-act="fp-keep" data-i="${i}">Save to phone</button></div>`).join(""):`<div class="note">No photos on this phone yet.</div>`}</div></div>`:""}
     <label class="f">Tech<input id="fp-tech" value="${esc(fpTech())}" placeholder="Initials, e.g. CC"></label>
     ${m?`<div class="panel"><div class="bd stack"><div><b class="mono" style="font-size:22px">${esc(m.serial)}</b><div><b>${esc(site(m).name||m.location||"")}</b></div><div class="note">${esc(site(m).address||"")}${site(m).size||m.size?" · "+esc(m.size||site(m).size):""} · WO ${esc(m.wo)}</div></div>
       ${PHOTO_TYPES.map(([k,l])=>{const n=taken.filter(p=>p.type===k).length;return `<div class="row" style="gap:8px"><label class="btn ${n?"":"primary"}" style="flex:2;justify-content:center;padding:14px">${l}${n?` ✓${n>1?" ×"+n:""}`:""}<input type="file" accept="image/*" capture="environment" hidden data-fp="${k}"></label><label class="btn" style="flex:1;justify-content:center;padding:14px">Saved photo<input type="file" accept="image/*" hidden data-fp="${k}"></label></div>`}).join("")}
@@ -1973,13 +1975,17 @@ async function fpSave(file,type){const m=S.meters.get(fpState.sel),o=m&&S.orders
   const name=`${fpName(m.serial)}_${d}_${type}${type==="additional"&&n?"-"+(n+1):""}.${ext}`;
   const folder=`${fpName(m.serial)} ${fpName(site.name||m.location||"")} ${d}`.replace(/\s+/g," ").trim();
   fpState.busy=`Saving ${name}…`;render();const entry={type,name,folder,date:d,at:Date.now(),by:fpTech()};
-  let queued=false;
-  try{if(!navigator.onLine)throw new TypeError("offline");await withTimeout(fpUpload(o.photoFolder,`${folder}/${name}`,file),60000)}
+  let queued=false;const rel=`${folder}/${name}`;
+  try{await arPut({id:"a"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),at:Date.now(),rel,link:o.photoFolder,name,blob:file,mid:m.id,serial:m.serial,uploaded:false})}catch(e){}
+  try{if(!navigator.onLine)throw new TypeError("offline");await withTimeout(fpUpload(o.photoFolder,rel,file),60000);await fpVerify(o.photoFolder,rel,file.size);await arMark(rel,true)}
   catch(e){if(!isNetErr(e)){fpState.busy="";toast("Couldn't save the photo: "+e.message);render();return}
     try{await obAdd({kind:"photo",link:o.photoFolder,rel:`${folder}/${name}`,blob:file,name});queued=true}catch(err){fpState.busy="";toast("No signal, and the phone couldn't keep the photo: "+err.message);render();return}}
   try{const r=await meterOp(m.id,{op:"photo",entry});fpState.busy="";obCount();toast(queued||r==="queued"?`No signal: ${name} is saved on the phone and will upload when you're back in service.`:"Saved "+name)}
   catch(e){fpState.busy="";toast("Photo saved, but the list couldn't update: "+e.message)}render()}
 async function fieldPhotoAction(act,a){
+  if(act==="fp-backup"){if(fpState.backup){fpState.backup=null}else{try{fpState.backup=(await arAll()).sort((a,b)=>b.at-a.at)}catch(e){fpState.backup=[]}}render();return true}
+  if(act==="fp-keep"){const x=fpState.backup&&fpState.backup[+a.dataset.i];if(!x)return true;const f=new File([x.blob],x.name,{type:x.blob.type||"image/jpeg"});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f]})}catch(e){}}else offer(x.name,x.blob);return true}
   if(act==="fp-pick"){fpState.sel=a.dataset.id;render();window.scrollTo(0,0);return true}
   if(act==="fp-done"){fpState.sel="";fpState.q="";render();setTimeout(()=>{const q=document.getElementById("fp-q");if(q)q.focus()},50);return true}
   if(act==="fp-note"){const t=(document.getElementById("fp-note").value||"").trim();if(!t)return true;try{const r=await meterOp(fpState.sel,{op:"note",note:{text:t,at:Date.now(),by:fpTech()}});toast(r==="queued"?"No signal: note saved on the phone.":"Note saved")}catch(e){toast("Couldn't save: "+e.message)}render();return true}
@@ -2002,11 +2008,21 @@ async function fieldPhotoAction(act,a){
 const normSerial=s=>String(s||"").trim().toUpperCase().replace(/^0+(?=.)/,"");
 /* ---------- outbox: photos and field entries wait on the phone when there's no signal, then upload by themselves ---------- */
 const OB={db:null,n:0,photos:0,busy:false,err:""};
-function obDb(){return new Promise((res,rej)=>{if(OB.db)return res(OB.db);const r=indexedDB.open("mta-outbox",1);r.onupgradeneeded=()=>r.result.createObjectStore("q",{keyPath:"id"});r.onsuccess=()=>{OB.db=r.result;res(r.result)};r.onerror=()=>rej(r.error)})}
-const obTx=async(mode,fn)=>{const db=await obDb();return new Promise((res,rej)=>{const tx=db.transaction("q",mode);const st=tx.objectStore("q");const out=fn(st);tx.oncomplete=()=>res(out&&out.result!==undefined?out.result:undefined);tx.onerror=()=>rej(tx.error)})};
+function obDb(){return new Promise((res,rej)=>{if(OB.db)return res(OB.db);const r=indexedDB.open("mta-outbox",2);r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains("q"))d.createObjectStore("q",{keyPath:"id"});if(!d.objectStoreNames.contains("a"))d.createObjectStore("a",{keyPath:"id"})};r.onsuccess=()=>{OB.db=r.result;res(r.result)};r.onerror=()=>rej(r.error)})}
+const obTx=async(mode,fn,store="q")=>{const db=await obDb();return new Promise((res,rej)=>{const tx=db.transaction(store,mode);const st=tx.objectStore(store);const out=fn(st);tx.oncomplete=()=>res(out&&out.result!==undefined?out.result:undefined);tx.onerror=()=>rej(tx.error)})};
 const obAll=()=>obTx("readonly",st=>st.getAll());
 const obAdd=item=>obTx("readwrite",st=>st.put({id:"q"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),at:Date.now(),...item}));
 const obDel=id=>obTx("readwrite",st=>st.delete(id));
+/* second copy: every photo stays on the phone for 14 days, marked once SharePoint has it */
+const KEEP_DAYS=14;
+const arPut=item=>obTx("readwrite",st=>st.put(item),"a");
+const arAll=()=>obTx("readonly",st=>st.getAll(),"a");
+async function arMark(rel,ok){try{const all=await arAll();const it=all.find(x=>x.rel===rel);if(it){it.uploaded=ok;it.checkedAt=Date.now();await arPut(it)}}catch(e){}}
+async function arPurge(){try{const all=await arAll();const old=all.filter(x=>x.uploaded&&Date.now()-x.at>KEEP_DAYS*864e5);for(const x of old)await obTx("readwrite",st=>st.delete(x.id),"a")}catch(e){}}
+/* an upload only counts once SharePoint reports the file with the same size */
+async function fpVerify(link,rel,size){const f=await fpFolder(link);const it=await gfetch(`/drives/${f.drive}/items/${f.id}:/${rel.split("/").map(encodeURIComponent).join("/")}`);
+  if(!it||it.size!==size){const e=new Error("The upload didn't arrive complete");throw e}return true}
+try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
 function isNetErr(e){const m=String(e&&e.message||e||"");return !navigator.onLine||e instanceof TypeError||e&&e.name==="AbortError"||/fetch|network|Load failed|timed out|offline|no_network|endpoints_resolution|can't reach|internet connection/i.test(m)}
 /* change a meter the same way now (on this phone) and later (on the server) */
 function obApply(m,op){const n=clone(m||{});if(op.op==="set")setPath(n,op.path,op.value);else if(op.op==="photo"){n.fphotos=[...(n.fphotos||[])];if(!n.fphotos.some(p=>p.name===op.entry.name&&p.folder===op.entry.folder))n.fphotos.push(op.entry)}
@@ -2021,10 +2037,11 @@ function obBanner(){let el=document.getElementById("ob-banner");if(!OB.n){if(el)
 async function obFlush(){if(OB.busy)return;OB.busy=true;let all;try{all=(await obAll()).sort((a,b)=>a.at-b.at)}catch(e){OB.busy=false;return}if(!all.length){OB.busy=false;obCount();return}
   obBanner();let done=0;
   try{for(const it of all){
-      try{if(it.kind==="photo")await withTimeout(fpUpload(it.link,it.rel,it.blob),120000);
+      try{if(it.kind==="photo"){await withTimeout(fpUpload(it.link,it.rel,it.blob),120000);await fpVerify(it.link,it.rel,it.blob.size);await arMark(it.rel,true)}
         else if(it.kind==="meter"){let base=S.meters.get(it.mid);try{base=await Store.get("meters",it.mid)||base}catch(e){if(isNetErr(e))throw e}const n=obApply(base,it.o);await put("meters",it.mid,n)}
         await obDel(it.id);done++;OB.err=""}
-      catch(e){if(isNetErr(e))break;OB.err=e.message;await obDel(it.id);toast("One saved item couldn't upload and was dropped: "+e.message)}}}
+      catch(e){if(isNetErr(e))break;OB.err=e.message;if(it.kind==="photo"){it.tries=(it.tries||0)+1;await obTx("readwrite",st=>st.put(it));continue}
+        await obDel(it.id);toast("One change couldn't be saved: "+e.message)}}}
   finally{OB.busy=false;await obCount();if(done){toast(`${done} saved item${done>1?"s":""} uploaded.`);softRender()}}}
 const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timed out")),ms))]);
 window.addEventListener("online",()=>setTimeout(obFlush,1500));
