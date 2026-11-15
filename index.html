@@ -376,6 +376,7 @@ function route(){
   for(const p of ["job","meter","report","hist","email","cust","req"]) if(h.startsWith(p+"-"))return{v:p,id:h.slice(p.length+1)};
   if(h.startsWith("order-"))return{v:"job",id:h.slice(6)};
   if(h==="qbo"||h.startsWith("qbo-"))return{v:"qbo",id:h.slice(4)};
+  if(h.startsWith("fphoto-"))return{v:"fphoto",id:h.slice(7)};
   if(h.startsWith("fieldrep-"))return{v:"fieldrep",id:h.slice(9)};
   if(h.startsWith("bphone-"))return{v:"bphone",id:h.slice(7)};
   if(h.startsWith("batch-")){const [id,tab,n]=h.slice(6).split(".");return{v:"batch",id,tab:tab||"job",n}}
@@ -392,7 +393,7 @@ function render(){
   const reviewN=[...S.meters.values()].filter(m=>m.status==="ready"||m.status==="question").length;
   const reqN=REQ.state==="ready"?reqSubmittedN():0;
   $("#nav").innerHTML=[["jobs","Jobs &amp; meters"],["requests","Requests"+(reqN?`<span class="count">${reqN}</span>`:"")],["review","Review"+(reviewN?`<span class="count">${reviewN}</span>`:"")],["customers","Customers"],["perf","Performance"],["setup","Limits &amp; lists"]]
-    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email","batch","fieldrep"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v))||(h==="setup"&&r.v==="qbo"))?"on":""}">${t}</a>`).join("");
+    .map(([h,t])=>`<a href="#${h}" class="${(r.v===h||(h==="jobs"&&["job","meter","report","hist","email","batch","fieldrep","fphoto"].includes(r.v))||(h==="customers"&&["cust","addrimport"].includes(r.v))||(h==="setup"&&r.v==="qbo"))?"on":""}">${t}</a>`).join("");
   $("#mode").innerHTML=account&&mode!=="signin"?`${esc(account.name||account.username||"")} · <a href="#" data-act="signout">Sign out</a>`:"";
   $("#nav").hidden=mode!=="ready";
   const app=$("#app");
@@ -407,6 +408,7 @@ function render(){
   else if(r.v==="review")app.innerHTML=viewReview();
   else if(r.v==="setup")app.innerHTML=viewSetup();
   else if(r.v==="qbo")app.innerHTML=viewQbo();
+  else if(r.v==="fphoto")app.innerHTML=viewFieldPhotos(r.id);
   else if(r.v==="fieldrep")app.innerHTML=viewFieldReport(r.id);
   else if(r.v==="bphone")app.innerHTML=window.BATCH?BATCH.phoneView(r.id):`<div class="empty">Loading…</div>`;
   else if(r.v==="batch")app.innerHTML=window.BATCH?BATCH.view(r.id,r.tab,r.n):`<div class="empty">Loading…</div>`;
@@ -1055,6 +1057,7 @@ document.addEventListener("click",async e=>{
     if(act==="track-copy"){copyText(a.dataset.t).then(ok=>{if(ok)toast("Tracking number copied. Paste it on the carrier's page.")});return}
     if(act&&act.startsWith("req-")&&await reqAction(act,a))return;
     if(act&&act.startsWith("qb-")&&await qbAction(act,a))return;
+    if(act&&(act.startsWith("fp-")||act==="fld-import")&&await fieldPhotoAction(act,a))return;
     if(act&&(act==="fmethod"||act.startsWith("fld-"))&&await fieldAction(act,a))return;
     if(act==="addr-setup"){a.disabled=true;a.textContent="Setting up…";
       try{const n=await setupAddresses();toast(`Address book ready: ${ADDR.list.length.toLocaleString()} addresses`)}catch(err){toast("Couldn't set up the address book: "+err.message);ADDR.state=Store.hasList("addresses")?"ready":"missing"}render();return}
@@ -1191,6 +1194,7 @@ document.addEventListener("click",async e=>{
 });
 
 document.addEventListener("input",e=>{
+  if(e.target&&e.target.id==="fp-q"){fpState.q=e.target.value;render();return}
   const t=e.target;
   if(t.id==="jsearch"){jobSearch=t.value;render();return}
   if(t.id==="csearch"){custSearch=t.value;render();return}
@@ -1235,6 +1239,8 @@ document.addEventListener("change",async e=>{
     if(t.checked&&reportPhotos(editing.draft).length>=3){t.checked=false;toast("Up to 3 photos can go on the report. Untick one first.");return}
     ph.onReport=t.checked;scheduleSave();toast(t.checked?"Photo will print on the report":"Photo removed from the report");return}
   if(t.id==="req-filter"){reqFilter=t.value;render();return}
+  if(t.id==="fp-tech"){try{localStorage.setItem("fp-tech",t.value.trim())}catch(e){}return}
+  if(t.dataset&&t.dataset.fp){const f=t.files[0];t.value="";if(f)await fpSave(f,t.dataset.fp);return}
   if(t.dataset&&t.dataset.fq){const [mid,path]=t.dataset.fq.split("|");const m=S.meters.get(mid);if(!m)return;const n=clone(m);setPath(n,path,t.value);if(path.startsWith("fld.")||path.startsWith("reads."))n.status=n.status||"in_progress";
     try{await put("meters",mid,n);const el=document.querySelector(`[data-facc="${mid}"]`);if(el)el.textContent=fieldAccTxt(n)||"—";if(path==="fld.cant")render()}catch(err){toast("Couldn't save: "+err.message)}return}
   if(t.dataset&&t.dataset.fo){const [oid,path]=t.dataset.fo.split("|");const o=S.orders.get(oid);if(!o)return;const n=clone(o);setPath(n,path,t.value.trim());try{await put("orders",oid,n);toast("Saved")}catch(err){toast("Couldn't save: "+err.message)}return}
@@ -1270,7 +1276,7 @@ const CFG={clientId:"762be64c-1abe-4f4a-9e0e-cd7f754c2ae2",tenantId:"69332761-6e
   lists:{orders:"MTA Jobs",meters:"MTA Meters",config:"MTA Config"},folder:"MeterTestingApp"};
 const SCOPES=["https://graph.microsoft.com/Sites.ReadWrite.All","https://graph.microsoft.com/User.Read"];
 const MOCK=/[?&]mock\b/.test(location.search);
-const APP_VERSION="1.15.1";
+const APP_VERSION="1.16.0";
 const MANAGE_SCOPES=[...SCOPES,"https://graph.microsoft.com/Sites.Manage.All"];
 let msalApp=null,account=null,siteId=null,listIds={},loadError="",refreshTimer=null;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1890,6 +1896,10 @@ function fieldPanel(o,ms){const fm=ms.filter(isStrap);const any=ms.some(m=>m.set
   return `<div class="panel"><div class="hd"><h2>Field testing</h2><div class="row"><button class="btn small primary" data-act="fld-add" data-id="${o.id}">Add field meter</button><button class="btn small" data-go="fieldrep-${o.id}">Field results report</button></div></div><div class="bd stack">
     <div class="grid g3"><label class="f">Project (on the report)<input data-fo="${o.id}|fieldProject" value="${esc(o.fieldProject||"")}" placeholder="e.g. Well Meter and Treatment Plant Testing"></label>
       <label class="f">Pass range low % (optional)<input data-fo="${o.id}|fieldTol.low" inputmode="decimal" value="${esc(t.low||"")}" placeholder="e.g. 95"></label><label class="f">Pass range high % (optional)<input data-fo="${o.id}|fieldTol.high" inputmode="decimal" value="${esc(t.high||"")}" placeholder="e.g. 105"></label></div>
+    <div class="grid g2"><label class="f">Photo folder (SharePoint link) for the phone photo screen<input data-fo="${o.id}|photoFolder" value="${esc(o.photoFolder||"")}" placeholder="Link to a SharePoint folder, e.g. Eagan Data › Jotform Photos"></label>
+      <div class="row" style="align-items:flex-end"><a class="btn primary" href="#fphoto-${o.id}">Phone photo screen</a></div></div>
+    <details><summary>Import the meter list from a workbook (e.g. a city's master list)</summary><div class="row" style="align-items:flex-end;margin-top:8px"><label class="f" style="flex:1;min-width:240px">SharePoint link to the workbook (uses the “Meters” sheet)<input id="fld-imp-link"></label><button class="btn small" data-act="fld-import" data-id="${o.id}">Import meters</button></div>
+      <div class="note">Each meter gets a work order number. Importing again updates names and addresses without adding duplicates.</div></details>
     <div class="note">Leave the pass range blank to report accuracy only. Entries here save as you go; open a meter for photos, Work needed and the full record.</div>
     ${fm.length?`<div class="fcards">${fm.map(card).join("")}</div>`:`<div class="note">No strap-on meters yet. Choose <b>Add field meter</b>${earlier.length?" or copy last time's meter list":""}.</div>`}
     ${earlier.length?`<div class="row"><span class="note">Copy the meter list (serial, size, type, make, location) from an earlier ${esc(o.client)} job:</span>${earlier.slice(0,3).map(x=>`<button class="btn small" data-act="fld-copy" data-id="${o.id}" data-from="${x.id}">${esc(jobName(x))} · ${esc(fmtDate(x.received))} (${metersOf(x.id).filter(isStrap).length})</button>`).join("")}</div>`:""}
@@ -1919,6 +1929,72 @@ async function fieldAction(act,a){
     try{for(const m of src){await createRec("meters",{orderId:a.dataset.id,wo:nextWo(),serial:m.serial,size:m.size,type:m.type,mfr:m.mfr,model:m.model,registration:m.registration,location:m.location,setting:"Field",fieldMethod:"strap",fld:{},reads:{},status:"in_progress",testDate:today(),dateIn:today(),tech:S.myTech||""});n++}
       toast(`${n} meters copied. Enter this visit's readings in the list.`)}catch(e){toast(`Copied ${n}; then stopped: ${e.message}`)}render();return true}
   return false}
+/* ---------- field photos into a shared SharePoint folder (Eagan style), named <serial>_<date>_<type> ---------- */
+const PHOTO_TYPES=[["birdseye","Bird's-eye"],["wide","Wide"],["additional","Additional"]];
+const fpState={q:"",sel:"",busy:"",folder:{}};
+const fpTech=()=>{try{return localStorage.getItem("fp-tech")||""}catch(e){return ""}};
+const fpName=s=>String(s||"").replace(/[\\/:*?"<>|#%]+/g," ").replace(/\s+/g," ").trim();
+async function fpFolder(link){if(fpState.folder[link])return fpState.folder[link];
+  const id="u!"+btoa(unescape(encodeURIComponent(link.trim()))).replace(/=+$/,"").replace(/\//g,"_").replace(/\+/g,"-");
+  const it=await gfetch(`/shares/${id}/driveItem`);if(!it.folder)throw new Error("That link isn't a folder.");
+  return fpState.folder[link]={drive:it.parentReference.driveId,id:it.id,name:it.name}}
+async function fpUpload(link,rel,blob){const f=await fpFolder(link);const base=`/drives/${f.drive}/items/${f.id}:/${rel.split("/").map(encodeURIComponent).join("/")}`;
+  if(blob.size<3.5e6)return gfetch(`${base}:/content?@microsoft.graph.conflictBehavior=rename`,{method:"PUT",body:blob,headers:{"Content-Type":blob.type||"image/jpeg"}});
+  const s=await gfetch(`${base}:/createUploadSession`,{method:"POST",body:JSON.stringify({item:{"@microsoft.graph.conflictBehavior":"rename"}}),headers:{"Content-Type":"application/json"}});
+  const chunk=3276800;let res;for(let i=0;i<blob.size;i+=chunk){const part=blob.slice(i,Math.min(i+chunk,blob.size));
+    const r=await fetch(s.uploadUrl,{method:"PUT",body:part,headers:{"Content-Range":`bytes ${i}-${i+part.size-1}/${blob.size}`}});if(!r.ok&&r.status!==202)throw new Error("Upload failed ("+r.status+")");res=r.status===202?null:await r.json().catch(()=>null)}
+  return res}
+function viewFieldPhotos(oid){const o=S.orders.get(oid);if(!o)return `<div class="empty">Job not found.</div>`;const ms=metersOf(oid);const today_=today();
+  const site=m=>m.site||{};const q=fpState.q.trim().toLowerCase();
+  const hits=q.length<2?[]:ms.filter(m=>[m.serial,site(m).name,site(m).address,site(m).account].join(" ").toLowerCase().includes(q)).slice(0,12);
+  const m=fpState.sel&&S.meters.get(fpState.sel);
+  const taken=m?(m.fphotos||[]).filter(p=>p.date===today_):[];
+  return `<div class="stack fphone"><div class="crumb"><a href="#job-${oid}">${esc(o.client)} · ${esc(jobName(o))}</a> › Field photos</div>
+    ${!o.photoFolder?`<div class="callout warn">The office needs to paste the photo folder's SharePoint link on the job page first.</div>`:""}
+    <label class="f">Tech<input id="fp-tech" value="${esc(fpTech())}" placeholder="Initials, e.g. CC"></label>
+    ${m?`<div class="panel"><div class="bd stack"><div><b class="mono" style="font-size:22px">${esc(m.serial)}</b><div><b>${esc(site(m).name||m.location||"")}</b></div><div class="note">${esc(site(m).address||"")}${site(m).size||m.size?" · "+esc(m.size||site(m).size):""} · WO ${esc(m.wo)}</div></div>
+      ${PHOTO_TYPES.map(([k,l])=>{const n=taken.filter(p=>p.type===k).length;return `<div class="row" style="gap:8px"><label class="btn ${n?"":"primary"}" style="flex:2;justify-content:center;padding:14px">${l}${n?` ✓${n>1?" ×"+n:""}`:""}<input type="file" accept="image/*" capture="environment" hidden data-fp="${k}"></label><label class="btn" style="flex:1;justify-content:center;padding:14px">Saved photo<input type="file" accept="image/*" hidden data-fp="${k}"></label></div>`}).join("")}
+      ${fpState.busy?`<div class="callout info">${esc(fpState.busy)}</div>`:""}
+      ${taken.length?`<div class="note">Saved today: ${taken.map(p=>esc(p.name)).join(", ")}</div>`:""}
+      <label class="f">Note (optional)<textarea id="fp-note" rows="2" placeholder="Anything to flag before the spreadsheet is written up"></textarea></label><button class="btn small" data-act="fp-note">Save note</button>
+      ${(m.fnotes||[]).length?`<div class="note">${m.fnotes.slice(-3).map(n=>`${esc(fmtDay(n.at))} ${esc(n.by||"")}: ${esc(n.text)}`).join("<br>")}</div>`:""}
+      <button class="btn" data-act="fp-done">Done – next meter</button></div></div>`
+    :`<label class="f">Find the meter<input id="fp-q" value="${esc(fpState.q)}" placeholder="Serial, business or address" autocomplete="off" style="font-size:18px"></label>
+      <div class="stack" style="gap:8px">${hits.map(x=>`<button class="btn" style="text-align:left;justify-content:flex-start;padding:12px;display:block" data-act="fp-pick" data-id="${x.id}"><b class="mono">${esc(x.serial)}</b> · ${esc(site(x).name||x.location||"")}<div class="note">${esc(site(x).address||"")}</div></button>`).join("")}
+      ${q.length>=2&&!hits.length?`<div class="note">No meter matches “${esc(fpState.q)}”.</div>`:""}</div>
+      <details><summary>Meter not on the list?</summary><div class="stack" style="margin-top:8px"><label class="f">Serial on the meter body<input id="fp-new-ser"></label><label class="f">Business name<input id="fp-new-name"></label><button class="btn small" data-act="fp-new">Add it and take photos</button></div></details>`}
+  </div>`}
+async function fpSave(file,type){const m=S.meters.get(fpState.sel),o=m&&S.orders.get(m.orderId);if(!m||!o)return;if(!o.photoFolder){toast("The photo folder link isn't set on the job yet.");return}
+  const d=today(),site=m.site||{};const n=(m.fphotos||[]).filter(p=>p.date===d&&p.type===type).length;
+  const ext=(/png$/i.test(file.type)?"png":/heic$/i.test(file.type)?"heic":"jpeg");
+  const name=`${fpName(m.serial)}_${d}_${type}${type==="additional"&&n?"-"+(n+1):""}.${ext}`;
+  const folder=`${fpName(m.serial)} ${fpName(site.name||m.location||"")} ${d}`.replace(/\s+/g," ").trim();
+  fpState.busy=`Saving ${name}…`;render();
+  try{await fpUpload(o.photoFolder,`${folder}/${name}`,file);
+    const nm={...S.meters.get(m.id)};nm.fphotos=[...(nm.fphotos||[]),{type,name,folder,date:d,at:Date.now(),by:fpTech()}];await put("meters",m.id,nm);fpState.busy="";toast("Saved "+name)}
+  catch(e){fpState.busy="";toast("Couldn't save the photo: "+e.message)}render()}
+async function fieldPhotoAction(act,a){
+  if(act==="fp-pick"){fpState.sel=a.dataset.id;render();window.scrollTo(0,0);return true}
+  if(act==="fp-done"){fpState.sel="";fpState.q="";render();setTimeout(()=>{const q=document.getElementById("fp-q");if(q)q.focus()},50);return true}
+  if(act==="fp-note"){const t=(document.getElementById("fp-note").value||"").trim();if(!t)return true;const m=S.meters.get(fpState.sel);const nm={...m,fnotes:[...(m.fnotes||[]),{text:t,at:Date.now(),by:fpTech()}]};
+    try{await put("meters",m.id,nm);toast("Note saved")}catch(e){toast("Couldn't save: "+e.message)}render();return true}
+  if(act==="fp-new"){const ser=(document.getElementById("fp-new-ser").value||"").trim(),nm=(document.getElementById("fp-new-name").value||"").trim();if(!ser||!nm){toast("Enter the serial and the business name.");return true}
+    const oid=route().id;try{const id=await createRec("meters",{orderId:oid,wo:nextWo(),serial:ser,location:nm,site:{name:nm,unplanned:true},setting:"Field",fieldMethod:"rig",reads:{},status:"in_progress",testDate:today(),dateIn:today(),tech:S.myTech||""});fpState.sel=String(id);render()}catch(e){toast("Couldn't add it: "+e.message)}return true}
+  if(act==="fld-import"){const o=S.orders.get(a.dataset.id);const link=(document.getElementById("fld-imp-link")||{}).value||"";if(!/sharepoint\.com/i.test(link)){toast("Paste the SharePoint link to the master workbook.");return true}
+    a.disabled=true;a.textContent="Reading…";try{const f=await Store.getShared(link.trim());const wb=XLSX.read(await f.arrayBuffer(),{type:"array"});
+      const sn=wb.SheetNames.find(n=>/^meters$/i.test(n))||wb.SheetNames.find(n=>/meter/i.test(n));const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:"",raw:false});
+      const h=rows.findIndex(r=>r.some(c=>/meter serial/i.test(String(c))));if(h<0)throw new Error("Couldn't find a 'Meter Serial #' header in the "+sn+" sheet.");
+      const hd=rows[h].map(c=>String(c).trim().toLowerCase());const col=re=>hd.findIndex(c=>re.test(c));
+      const C={ser:col(/meter serial/),acct:col(/^account #/),cust:col(/^customer #/),name:col(/account name/),addr:col(/service address/),area:col(/^area/),svc:col(/^service$/),size:col(/^size/)};
+      const have=new Map(metersOf(o.id).map(m=>[normSerial(m.serial),m]));let added=0,updated=0;
+      for(const r of rows.slice(h+1)){const ser=String(r[C.ser]||"").trim();if(!ser)continue;const g=k=>C[k]>=0?String(r[C[k]]||"").trim():"";
+        const site={account:g("acct"),customer:g("cust"),name:g("name"),address:g("addr"),area:g("area"),service:g("svc")};const ex=have.get(normSerial(ser));
+        if(ex){const n={...ex,site:{...(ex.site||{}),...site},location:ex.location||site.name,size:ex.size||g("size")};await put("meters",ex.id,n);updated++}
+        else{await createRec("meters",{orderId:o.id,wo:nextWo(),serial:ser,size:g("size"),location:site.name,site,setting:"Field",fieldMethod:"rig",reads:{},status:"in_progress",testDate:today(),dateIn:o.received||today(),tech:""});added++}
+        if((added+updated)%10===0){a.textContent=`Saving… ${added+updated}`}}
+      toast(`${added} meters added${updated?`, ${updated} updated`:""}.`)}catch(e){toast("Couldn't import: "+e.message)}render();return true}
+  return false}
+const normSerial=s=>String(s||"").trim().toUpperCase().replace(/^0+(?=.)/,"");
 /* ---------- shipping ---------- */
 const DEFAULT_CARRIERS=[
   {name:"UPS",shipUrl:"https://www.ups.com/ship",trackUrl:"https://www.ups.com/track?tracknum={tracking}"},
