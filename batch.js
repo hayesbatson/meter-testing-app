@@ -485,7 +485,7 @@ async function xlRead(file){if(!window.XLSX)throw new Error("The Excel tool didn
   B.xl={file,sheet,C,data,manifest,ops,map:Object.fromEntries(ops.map(o=>[o,o]))}}
 function xlBuild(){const {C,data,map}=B.xl;const v=i=>r=>String(r[i]==null?"":r[i]).trim();const runs=[],blocked=[];let cur=null,key="";
   data.forEach(r=>{const g=k=>v(C[k])(r);const reads=[...C.beg,...C.end].some(i=>v(i)(r));
-    if(!reads){if(/lock|stuck|frozen|seized|no reg|could not|couldn.t/i.test(g("notes"))){blocked.push({ser:g("ser"),wo:"",arrive:g("arrive"),run:null,pos:null,date:DATE_FROM_SHEET(g("date"))||today(),tech:map[g("op")]||g("op"),by:ME(),note:g("notes")});return}}
+    if(/lock/i.test(g("date"))||(!reads&&/lock|stuck|frozen|seized|no reg|could not|couldn.t/i.test(g("notes")))){{blocked.push({ser:g("ser"),wo:"",arrive:g("arrive"),run:null,pos:null,date:DATE_FROM_SHEET(g("date"))||today(),tech:map[g("op")]||g("op"),by:ME(),note:g("notes")});return}}
     const size=SIZE_FROM_SHEET(g("size")),date=DATE_FROM_SHEET(g("date")),tech=map[g("op")]||g("op");
     const vols=C.vol.map(i=>v(i)(r)),flows=C.flow.map(i=>v(i)(r).replace(/^\./,"0."));
     const k=[date,tech,size,g("make"),g("model"),g("unit"),vols.join("|"),flows.join("|")].join("~");
@@ -494,8 +494,11 @@ function xlBuild(){const {C,data,map}=B.xl;const v=i=>r=>String(r[i]==null?"":r[
     const row={...emptyRow(),ser:g("ser"),arrive:g("arrive"),b1,e1,b2:b2&&b2!==e1?b2:"",e2,b3:b3&&b3!==e2?b3:"",e3};if(g("notes"))row.note=g("notes");cur.rows.push(row)});
   runs.forEach(run=>{while(run.rows.length<posFor(run.size))run.rows.push(emptyRow());if(runDone(run))run.wasDone=true});
   return {runs,blocked}}
+const hasData=()=>{const j=J();return j.runs.some(r=>r.rows.some(y=>y.ser.trim()))||j.blocked.length>0};
 function xlPanel(){const x=B.xl,j=J();
-  if(!x){const empty=!j.runs.some(r=>r.rows.some(y=>y.ser.trim()))&&!j.blocked.length;if(!empty||j.approved)return "";
+  if(!x){const empty=!j.runs.some(r=>r.rows.some(y=>y.ser.trim()))&&!j.blocked.length;if(j.approved)return "";
+    if(!empty)return `<details class="panel"><summary class="hd" style="cursor:pointer"><h2>Update from the techs' Excel workbook</h2></summary><div class="bd stack"><div class="note">For a job kept in the spreadsheet: reads the final workbook and replaces this job's bench runs and locked-up meters with it. Meters keep their work order numbers; new meters get the next ones. You'll see a preview first.</div>
+      <div class="row" style="align-items:flex-end"><label class="btn small">Choose the workbook<input type="file" id="xl-up" accept=".xlsx,.xlsm,.xls" hidden></label><label class="f" style="flex:1;min-width:260px">Or paste its SharePoint link<input id="xl-link"></label><button class="btn small" data-act="b-xl-link">Read from SharePoint</button></div></div></details>`;
     return `<div class="panel"><div class="hd"><h2>Moving a job that's already in progress?</h2><label class="btn small">Import the techs' Excel sheet<input type="file" id="xl-up" accept=".xlsx,.xlsm,.xls" hidden></label></div><div class="bd row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:260px">Or paste the workbook's SharePoint link<input id="xl-link" placeholder="https://midamericameter365.sharepoint.com/…"></label><button class="btn small" data-act="b-xl-link">Read from SharePoint</button></div><div class="bd note">Choose the batch testing workbook the techs have been filling in (like Keystone_Aqua Batch 4.xlsx). The app reads every tested meter into bench runs, adds the client's serial list as this job's manifest, and gives each meter a work order number. Nothing is saved until you check the preview and click Import.</div></div>`}
   const {runs,blocked}=xlBuild();const meters=runs.reduce((s,r)=>s+r.rows.filter(y=>y.ser).length,0);const done=runs.filter(runDone).length;
   const dates=runs.map(r=>r.date).filter(Boolean).sort();const fails=runs.reduce((s,r)=>s+r.rows.filter(y=>y.ser&&calc(y,r).overall==="fail").length,0);
@@ -506,20 +509,23 @@ function xlPanel(){const x=B.xl,j=J();
     <div class="grid g3">${x.ops.map(o=>`<label class="f">Operator “${esc(o)}” is<select data-xlop="${esc(o)}"><option value="${esc(o)}" ${x.map[o]===o?"selected":""}>Keep “${esc(o)}” as written</option>${TECHS().filter(t=>t!==o).map(t=>`<option ${x.map[o]===t?"selected":""}>${esc(t)}</option>`).join("")}</select></label>`).join("")}</div>
     <div class="note">The tech's name or initials appear in the Operator column of the client file.</div>
     ${sizes.length?`<div class="callout warn">Unknown size${sizes.length>1?"s":""} in the sheet: ${esc(sizes.join(", "))}. Those runs will need the size picked on the Bench run screen.</div>`:""}
-    <div class="note">Each meter gets the next work order number, ${meters+blocked.length} in all, the same as if it had been entered here. The workbook itself isn't changed.</div>
+    ${hasData()?`<div class="callout warn">This replaces the job's ${j.runs.length} bench runs and ${j.blocked.length} locked-up meters with the workbook's. Meters already in the job keep their work order numbers.</div>
+      <label class="toggle"><input type="checkbox" id="xl-markok" ${x.markOk?"checked":""}> Mark the current warnings as checked (they were already reviewed in the spreadsheet)</label>`:`<div class="note">Each meter gets the next work order number, ${meters+blocked.length} in all, the same as if it had been entered here.</div>`}<div class="note">The workbook itself isn't changed.</div>
     <div class="row"><button class="btn primary" data-act="b-xl-go" ${unmapped.length?"disabled":""}>Import ${meters.toLocaleString()} meters</button><button class="btn" data-act="b-xl-cancel">Cancel</button>${unmapped.length?`<span class="note">Choose the tech for ${esc(unmapped.join(", "))} first.</span>`:""}</div></div></div>`}
 async function xlImport(btn){const x=B.xl,j=J();const {runs,blocked}=xlBuild();btn.disabled=true;const say=t=>{btn.textContent=t};
   try{
-    say("Numbering meters…");const n=runs.reduce((s,r)=>s+r.rows.filter(y=>y.ser).length,0)+blocked.length;const wos=await reserveWos(n);let k=0;
-    runs.forEach(r=>r.rows.forEach(y=>{if(y.ser)y.wo=wos[k++]}));blocked.forEach(b=>b.wo=wos[k++]);
-    if(x.manifest&&x.manifest.rows.length){say("Saving the client's serial list…");const id="m"+Date.now().toString(36);const dir=`customers/${safe(j.client)}/manifests`;
+    const replacing=hasData();const old=new Map();j.runs.forEach(r=>r.rows.forEach(y=>{if(y.ser&&y.wo)old.set(normSer(y.ser),y.wo)}));j.blocked.forEach(b=>{if(b.wo)old.set(normSer(b.ser),b.wo)});
+    const all=[...runs.flatMap(r=>r.rows.filter(y=>y.ser)),...blocked];all.forEach(y=>{const w=old.get(normSer(y.ser));if(w){y.wo=w;old.delete(normSer(y.ser))}});
+    const n=all.length;const need=all.filter(y=>!y.wo);say("Numbering meters…");const wos=need.length?await reserveWos(need.length):[];need.forEach((y,i)=>y.wo=wos[i]);
+    if(replacing&&x.markOk){const v={...j,runs};runs.forEach(r=>r.rows.forEach(y=>{if(!y.ser)return;allWarnings(y,r,v).forEach(f=>{if(f[2]){y.ok=y.ok||{};y.ok[f[2]]={by:ME(),at:new Date().toISOString(),note:"Reviewed in the spreadsheet"}}})}))}
+    if(x.manifest&&x.manifest.rows.length&&!j.files.length){say("Saving the client's serial list…");const id="m"+Date.now().toString(36);const dir=`customers/${safe(j.client)}/manifests`;
       await Store.putFile(`${dir}/${id}-${safe(x.file.name)}`,x.file);await Store.putJsonIf(`${dir}/${id}.json`,{name:x.file.name+" ("+x.manifest.sheet+")",cols:{ser:0,read:1},rows:x.manifest.rows},null);
       const meta={id,name:`${x.file.name} (${x.manifest.sheet})`,orig:`${dir}/${id}-${safe(x.file.name)}`,n:x.manifest.rows.length,by:ME(),at:today(),reads:x.manifest.rows.some(r=>r.read!=null)};
       const cr=custRec(j.client);cr.manifests=[...(cr.manifests||[]),meta];await putConfig("batchCust",{cust:S.batchCust});
       await saveJob(d=>{d.manifests=d.manifests||[];d.manifests.push(meta)})}
     const nb=blockOf(runs.length);for(let b=1;b<=nb;b++){say(`Saving runs (${b} of ${nb})…`);const part=runs.filter(r=>blockOf(r.no)===b);await updateJson(blockPath(b),()=>({runs:part}),{runs:[]})}
     const dates=runs.map(r=>r.date).filter(Boolean).sort();
-    await saveJob(d=>{d.blocks=nb;d.blocked=[...(d.blocked||[]),...blocked];d.imported={file:x.file.name,at:Date.now(),by:ME(),meters:n};if(dates[0]&&d.sched)d.sched.start=dates[0]});
+    await saveJob(d=>{d.blocks=nb;d.blocked=replacing?blocked:[...(d.blocked||[]),...blocked];d.imported={file:x.file.name,at:Date.now(),by:ME(),meters:n};if(dates[0]&&d.sched)d.sched.start=dates[0]});
     B.xl=null;toast(`${n.toLocaleString()} meters imported in ${runs.length} runs.`);B.state="idle";render()}
   catch(e){btn.disabled=false;say("Try the import again");toast("The import stopped: "+e.message)}}
 
@@ -579,6 +585,7 @@ document.addEventListener("change",async e=>{const t=e.target;if(!inBatch(t)||!B
   if(t.dataset.bphoto){const f=t.files[0];t.value="";if(!f)return;const [ri,pi]=t.dataset.bphoto.split("|").map(Number);const rn=j.runs[ri],row=rn.rows[pi];
     toast("Saving the photo…");try{await addPhoto(f,row,rn,pi);B.qrFor="";toast(`Photo saved to the job for ${row.ser}.`)}catch(err){toast("Couldn't save the photo: "+err.message)}render();return}
   if(t.id==="xl-up"){const f=t.files[0];t.value="";if(!f)return;toast("Reading the workbook…");try{await xlRead(f)}catch(err){toast("Couldn't read that file: "+err.message)}render();window.scrollTo(0,0);return}
+  if(t.id==="xl-markok"){B.xl.markOk=t.checked;return}
   if(t.dataset.xlop!==undefined){B.xl.map[t.dataset.xlop]=t.value;render();return}
   if(t.id==="mf-up"){const f=t.files[0];t.value="";if(!f)return;try{await mfRead(f)}catch(err){toast("Couldn't read that file: "+err.message)}render();window.scrollTo(0,0);return}
   if(t.dataset.mfc){B.mf.cols[t.dataset.mfc]=+t.value;render();return}
